@@ -1,0 +1,48 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl
+      - run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - run: cargo build --release --locked --target x86_64-unknown-linux-musl
+      - name: Verify the binary is static
+        run: |
+          bin=target/x86_64-unknown-linux-musl/release/niruscreensaver
+          file "$bin"
+          if ldd "$bin" 2>&1 | grep -q "=>"; then
+            echo "::error::niruscreensaver is dynamically linked"; exit 1
+          fi
+      - name: Smoke test in a real X session
+        run: |
+          sudo apt-get install -y xvfb x11-utils x11-xserver-utils fonts-dejavu-core procps
+          bin=target/x86_64-unknown-linux-musl/release/niruscreensaver
+          "$bin" --version
+          Xvfb :91 -screen 0 800x600x24 -nolisten tcp & sleep 1
+          DISPLAY=:91 "$bin" & pid=$!
+          sleep 2
+          kill -0 $pid || { echo "::error::screensaver exited"; exit 1; }
+          kill $pid
+      - run: |
+          mkdir -p dist
+          cp target/x86_64-unknown-linux-musl/release/niruscreensaver dist/
+          cd dist && sha256sum niruscreensaver > SHA256SUMS && cat SHA256SUMS
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'v0.1.0' }}
+          files: |
+            dist/niruscreensaver
+            dist/SHA256SUMS
+          generate_release_notes: true
