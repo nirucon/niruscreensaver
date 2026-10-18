@@ -84,7 +84,7 @@ which starts this program; running it by hand shows the screen immediately.
 
 ## Status
 
-Version 0.1.0. Shows the date, time, hostname and away counter.
+Version 0.4.0. Shows the date, time, hostname and away counter.
 
 Missing: password protection (use nirulock), multiple screens, and a preview in
 the settings file.
