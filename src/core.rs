@@ -64,6 +64,21 @@ impl TextRenderer {
         self.line_height
     }
 
+    /// A separate glyph cache at another size, sharing the loaded font bytes.
+    pub fn at_size(&self, size: f32) -> Self {
+        Self {
+            font: self.font.clone(),
+            size,
+            line_height: self
+                .font
+                .as_scaled(ab_glyph::PxScale::from(size))
+                .height()
+                .ceil() as i16,
+            masks: std::collections::HashMap::new(),
+            image_byte_order: self.image_byte_order,
+        }
+    }
+
     /// Width of a string, using the font's advances.
     pub fn width(&self, text: &str) -> i16 {
         let scaled = self.font.as_scaled(ab_glyph::PxScale::from(self.size));

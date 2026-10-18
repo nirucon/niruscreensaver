@@ -65,12 +65,10 @@ clock_size = 88.0
 # How long the session waits before showing this screen.
 idle_minutes = 15
 
-# Lock this many minutes after the screen appears, then give the lock screen
-# this many more minutes before releasing it. 0 disables either step.
+# Lock this many minutes after the screen appears. 0 disables this step.
 lock_after_minutes = 15
-lock_timeout_minutes = 5
 
-# Turn the display off this many minutes after it appears. 0 disables.
+# Turn the display off this many minutes after locking. 0 disables.
 dpms_off_minutes = 15
 
 # Show "away for ..." after this many idle seconds.
@@ -84,14 +82,17 @@ border = "2a2a2d"
 focus = "5a5a60"
 ```
 
-These numbers are read by `niruidle` and by `niruwm` itself, and
-`lock_timeout_minutes` is read by `nirulock`, so one file decides when every
-NIRU program sleeps, locks and wakes. Running this program by hand shows the
-screen immediately.
+The idle ladder is read by `niruidle`. Running this program by hand shows the
+screen immediately. Legacy `lock_timeout_minutes` is accepted but ignored:
+neither the saver nor the idle daemon dismisses a lock on a timer.
 
 ## Status
 
-Version 0.7.0. Shows the date, time, hostname and away counter.
+Version 0.8.0. Shows the date, time, hostname and away counter.
+
+Part of a personal desktop for the author's own use; others are welcome to try it.
+[Roadmap](https://github.com/nirucon/nirux/blob/main/ROADMAP.md).
+Fonts/hostname are cached for the run; redraws follow clock/away deadlines or X events.
 
 Missing: password protection (use nirulock), multiple screens, and a preview in
 the settings file.

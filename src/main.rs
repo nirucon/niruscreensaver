@@ -71,23 +71,17 @@ impl From<x11rb::errors::ReplyError> for Error {
 pub type Result<T> = std::result::Result<T, Error>;
 
 use chrono::Local;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use x11rb::{
     connection::{Connection, RequestConnection as _},
     protocol::{screensaver::ConnectionExt as _, xproto::*, Event},
 };
-
-const TICK: Duration = Duration::from_secs(1);
 
 /// Idle time in seconds, read from the X server's MIT-SCREEN-SAVER extension
 /// when available, otherwise from the time since the program started.
 ///
 /// MIT-SCREEN-SAVER is the only portable way to ask X11 how long the user has
 /// been idle without polling input devices.
-fn idle_seconds(c: &x11rb::rust_connection::RustConnection, root: Window) -> u64 {
-    idle_via_extension(c, root).unwrap_or(0)
-}
-
 fn idle_via_extension(c: &x11rb::rust_connection::RustConnection, root: Window) -> Option<u64> {
     let ext = c
         .extension_information(x11rb::protocol::screensaver::X11_EXTENSION_NAME)
@@ -97,13 +91,14 @@ fn idle_via_extension(c: &x11rb::rust_connection::RustConnection, root: Window) 
     Some(u64::from(info.ms_since_user_input) / 1000)
 }
 
-fn draw(surface: &mut core::Surface, cfg: &config::Config) -> Result<()> {
-    let font = core::find_font(cfg.font_path.as_deref());
-    if font.is_empty() {
-        return Err("no monospace font found; set font_path in the config".into());
-    }
-    let setup = surface.c.setup().clone();
-    let mut text = core::TextRenderer::new(&font, cfg.font_size, &setup)?;
+fn draw(
+    surface: &mut core::Surface,
+    cfg: &config::Config,
+    text: &mut core::TextRenderer,
+    big: &mut core::TextRenderer,
+    hostname: &str,
+    idle: u64,
+) -> Result<()> {
     let pal = &cfg.palette;
 
     surface.clear(pal.background)?;
@@ -111,9 +106,7 @@ fn draw(surface: &mut core::Surface, cfg: &config::Config) -> Result<()> {
     let centre_x = (surface.width / 2) as i16;
     let line = text.line_height();
     let clock_baseline = (surface.height / 2) as i16 - line;
-    let big_size = core::TextRenderer::new(&font, cfg.clock_size, &setup)?;
-    let big_line = big_size.line_height();
-    let mut big = big_size;
+    let big_line = big.line_height();
 
     big.draw_centred(
         &surface.c,
@@ -136,13 +129,12 @@ fn draw(surface: &mut core::Surface, cfg: &config::Config) -> Result<()> {
         surface.depth,
         centre_x,
         host_baseline,
-        &core::hostname(),
+        hostname,
         pal.muted,
         pal.background,
     )?;
 
     // Idle counter, only when the screen has been idle for a while.
-    let idle = idle_seconds(&surface.c, surface.c.setup().roots[surface.screen_num].root);
     if idle >= u64::from(cfg.show_away_after_seconds) {
         text.draw_centred(
             &surface.c,
@@ -163,27 +155,21 @@ fn draw(surface: &mut core::Surface, cfg: &config::Config) -> Result<()> {
 
 /// Run the screensaver until a key or button dismisses it.
 ///
-/// The loop blocks on the X socket with a one second timeout: the clock stays
-/// correct, and an idle screensaver uses no CPU.
+/// Wait for X input or the next visible clock/away deadline, not a polling tick.
 pub fn run(cfg: config::Config) -> Result<()> {
     let mut surface = core::Surface::new("NIRUSCREENSAVER")?;
-    let mut last_minute = String::new();
+    let font = core::find_font(cfg.font_path.as_deref());
+    if font.is_empty() {
+        return Err("no monospace font found; set font_path in the config".into());
+    }
+    let setup = surface.c.setup().clone();
+    let mut text = core::TextRenderer::new(&font, cfg.font_size, &setup)?;
+    let mut big = text.at_size(cfg.clock_size);
+    let hostname = core::hostname();
+    let started = Instant::now();
+    let mut repaint_at = Instant::now();
     loop {
-        let minute = Local::now().format("%Y-%m-%d %H:%M").to_string();
-        if minute != last_minute {
-            draw(&mut surface, &cfg)?;
-            last_minute = minute;
-        }
-        surface.c.flush()?;
-
-        // One second timeout so a new minute is drawn promptly.
-        let ready = wait_readable(
-            std::os::fd::AsRawFd::as_raw_fd(surface.c.stream()),
-            TICK.as_millis() as i32,
-        );
-        if !ready {
-            continue;
-        }
+        // Drain x11rb's buffered events before blocking on its socket.
         while let Some(event) = surface.c.poll_for_event()? {
             match event {
                 // Any key or click dismisses it. The grabs are released so the
@@ -193,12 +179,43 @@ pub fn run(cfg: config::Config) -> Result<()> {
                     return Ok(());
                 }
                 Event::Expose(_) => {
-                    last_minute.clear();
+                    repaint_at = Instant::now();
                 }
                 _ => {}
             }
         }
+        if Instant::now() >= repaint_at {
+            let root = surface.c.setup().roots[surface.screen_num].root;
+            let idle =
+                idle_via_extension(&surface.c, root).unwrap_or_else(|| started.elapsed().as_secs());
+            draw(&mut surface, &cfg, &mut text, &mut big, &hostname, idle)?;
+            let ms = next_redraw_ms(
+                Local::now().timestamp_millis(),
+                idle,
+                cfg.show_away_after_seconds,
+            );
+            repaint_at = Instant::now() + Duration::from_millis(ms);
+        }
+        surface.c.flush()?;
+        let timeout = repaint_at
+            .saturating_duration_since(Instant::now())
+            .as_millis()
+            .min(60_000) as i32;
+        wait_readable(
+            std::os::fd::AsRawFd::as_raw_fd(surface.c.stream()),
+            timeout.max(1),
+        );
     }
+}
+
+fn next_redraw_ms(wall_ms: i64, idle: u64, show_after: u32) -> u64 {
+    let clock = (60_000 - wall_ms.rem_euclid(60_000)) as u64;
+    let away = if idle < u64::from(show_after) {
+        (u64::from(show_after) - idle) * 1000
+    } else {
+        (60 - idle % 60) * 1000
+    };
+    clock.min(away).max(1)
 }
 
 /// Block until the X socket is readable or the timeout expires.
@@ -251,5 +268,17 @@ fn main() {
             eprintln!("Usage: niruscreensaver [--version|--config|--preview]");
             std::process::exit(2)
         }
+    }
+}
+
+#[cfg(test)]
+mod scheduling_tests {
+    use super::next_redraw_ms;
+    #[test]
+    fn waits_for_the_first_visible_change() {
+        assert_eq!(next_redraw_ms(0, 0, 60), 60_000);
+        assert_eq!(next_redraw_ms(1_500, 58, 60), 2_000);
+        assert_eq!(next_redraw_ms(59_750, 60, 60), 250);
+        assert_eq!(next_redraw_ms(0, 61, 60), 59_000);
     }
 }

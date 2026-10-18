@@ -21,8 +21,7 @@ pub struct Config {
     /// Turn the display off this many minutes after the screen locked.
     /// 0 disables it. Read by NIRUIDLE.
     pub dpms_off_minutes: u32,
-    /// Release a lock screen that has had no password for this long.
-    /// 0 disables it. Read by NIRULOCK, multiplied by ten.
+    /// Deprecated compatibility input. Never dismisses a lock screen.
     pub lock_timeout_minutes: u32,
     /// Show "away for ..." once the screen has been idle this long.
     pub show_away_after_seconds: u32,
@@ -38,7 +37,7 @@ impl Default for Config {
             idle_minutes: 15,
             lock_after_minutes: 15,
             dpms_off_minutes: 15,
-            lock_timeout_minutes: 5,
+            lock_timeout_minutes: 0,
             show_away_after_seconds: 60,
             palette: palette::Palette::default(),
         }
@@ -121,7 +120,7 @@ impl Config {
 
     pub fn describe(&self) -> String {
         format!(
-            "config: {}\nidle after: {} min\nlock {} min later\ndisplay off: {} min after locking\nlock screen gives up after: {} min\naway text after: {} s\nclock size: {}\nfont: {}",
+            "config: {}\nidle after: {} min\nlock {} min later\ndisplay off: {} min after locking\nlegacy lock_timeout_minutes: {} (ignored)\naway text after: {} s\nclock size: {}\nfont: {}",
             config_file().display(),
             self.idle_minutes,
             self.lock_after_minutes,
@@ -130,11 +129,7 @@ impl Config {
             } else {
                 self.dpms_off_minutes.to_string()
             },
-            if self.lock_timeout_minutes == 0 {
-                "never".to_string()
-            } else {
-                (self.lock_timeout_minutes * 10).to_string()
-            },
+            self.lock_timeout_minutes,
             self.show_away_after_seconds,
             self.clock_size,
             self.font_path.as_deref().unwrap_or("auto"),
