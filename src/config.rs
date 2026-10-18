@@ -15,8 +15,11 @@ pub struct Config {
     pub clock_size: f32,
     /// Start the screensaver after this many minutes of idle time.
     pub idle_minutes: u32,
-    /// Turn the display off this many minutes after the screensaver started.
-    /// 0 disables it.
+    /// Lock the screen this many minutes after the screensaver appeared.
+    /// 0 disables locking. Read by NIRUIDLE.
+    pub lock_after_minutes: u32,
+    /// Turn the display off this many minutes after the screen locked.
+    /// 0 disables it. Read by NIRUIDLE.
     pub dpms_off_minutes: u32,
     /// Show "away for ..." once the screen has been idle this long.
     pub show_away_after_seconds: u32,
@@ -30,6 +33,7 @@ impl Default for Config {
             font_size: 22.0,
             clock_size: 88.0,
             idle_minutes: 15,
+            lock_after_minutes: 15,
             dpms_off_minutes: 15,
             show_away_after_seconds: 60,
             palette: palette::Palette::default(),
@@ -74,6 +78,9 @@ impl Config {
         if let Some(n) = v.get("idle_minutes").and_then(|x| x.as_integer()) {
             cfg.idle_minutes = n.clamp(0, 100_000) as u32;
         }
+        if let Some(n) = v.get("lock_after_minutes").and_then(|x| x.as_integer()) {
+            cfg.lock_after_minutes = n.clamp(0, 100_000) as u32;
+        }
         if let Some(n) = v.get("dpms_off_minutes").and_then(|x| x.as_integer()) {
             cfg.dpms_off_minutes = n.clamp(0, 100_000) as u32;
         }
@@ -104,9 +111,10 @@ impl Config {
 
     pub fn describe(&self) -> String {
         format!(
-            "config: {}\nidle after: {} min\ndisplay off: {} min after the screensaver\naway text after: {} s\nclock size: {}\nfont: {}",
+            "config: {}\nidle after: {} min\nlock {} min later\ndisplay off: {} min after locking\naway text after: {} s\nclock size: {}\nfont: {}",
             config_file().display(),
             self.idle_minutes,
+            self.lock_after_minutes,
             if self.dpms_off_minutes == 0 {
                 "never".to_string()
             } else {
@@ -127,6 +135,7 @@ mod tests {
     fn defaults_match_the_request() {
         let c = Config::default();
         assert_eq!(c.idle_minutes, 15);
+        assert_eq!(c.lock_after_minutes, 15);
         assert_eq!(c.dpms_off_minutes, 15);
     }
 
