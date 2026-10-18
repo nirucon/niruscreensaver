@@ -186,7 +186,12 @@ pub fn run(cfg: config::Config) -> Result<()> {
         }
         while let Some(event) = surface.c.poll_for_event()? {
             match event {
-                Event::KeyPress(_) | Event::ButtonPress(_) => return Ok(()),
+                // Any key or click dismisses it. The grabs are released so the
+                // session can be used normally afterwards.
+                Event::KeyPress(_) | Event::ButtonPress(_) => {
+                    surface.release_input()?;
+                    return Ok(());
+                }
                 Event::Expose(_) => {
                     last_minute.clear();
                 }

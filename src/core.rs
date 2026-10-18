@@ -269,7 +269,10 @@ impl Surface {
                 // Override redirect: no window manager involvement, so the
                 // screen cannot be moved, resized or covered.
                 .override_redirect(1)
-                .background_pixel(0)
+                // Opaque black, never 0. A pixel value of 0 means "transparent"
+                // on a 32-bit visual, which made the idle screen see-through
+                // and showed the desktop behind it.
+                .background_pixel(0x000000)
                 .event_mask(EventMask::EXPOSURE | EventMask::KEY_PRESS | EventMask::BUTTON_PRESS),
         )?;
         c.create_gc(gc, win, &CreateGCAux::new())?;
@@ -282,14 +285,38 @@ impl Surface {
             name.as_bytes(),
         )?;
         c.map_window(win)?;
-        // Take the cursor away: a pointer over the lock screen is noise.
+        // Hide the pointer. A glyph cursor with no glyph still drew one pixel,
+        // so this is a cursor built from an empty pixmap, which is invisible.
         let blank = c.generate_id()?;
-        let font = c.generate_id()?;
-        c.open_font(font, b"cursor")?;
-        // A transparent 1x1 cursor hides the pointer.
-        c.create_glyph_cursor(blank, font, font, 0, 0, 1, 1, 0, 0, 0, 0)?;
+        let shape = c.generate_id()?;
+        c.create_pixmap(1, shape, screen.root, 1, 1)?;
+        c.create_cursor(blank, shape, shape, 0, 0, 0, 0, 0, 0, 0, 0)?;
         c.change_window_attributes(win, &ChangeWindowAttributesAux::new().cursor(blank))?;
-        c.close_font(font)?;
+        c.free_cursor(blank)?;
+        c.free_pixmap(shape)?;
+
+        // Take the keyboard and the pointer. Without this every key press went
+        // to the application underneath, and typing a password meant typing
+        // into an editor. The grab also stops clicks from reaching anything
+        // else while the screen is covered.
+        c.grab_keyboard(
+            true,
+            win,
+            x11rb::CURRENT_TIME,
+            GrabMode::ASYNC,
+            GrabMode::ASYNC,
+        )?;
+        c.grab_pointer(
+            true,
+            win,
+            EventMask::BUTTON_PRESS | EventMask::POINTER_MOTION,
+            GrabMode::ASYNC,
+            GrabMode::ASYNC,
+            x11rb::NONE,
+            x11rb::NONE,
+            x11rb::CURRENT_TIME,
+        )?;
+        c.set_input_focus(InputFocus::PARENT, win, x11rb::CURRENT_TIME)?;
         c.flush()?;
         Ok(Self {
             c,
@@ -317,6 +344,14 @@ impl Surface {
                 height: self.height,
             }],
         )?;
+        Ok(())
+    }
+
+    /// Release the keyboard and pointer grabs.
+    pub fn release_input(&self) -> crate::Result<()> {
+        self.c.ungrab_keyboard(x11rb::CURRENT_TIME)?;
+        self.c.ungrab_pointer(x11rb::CURRENT_TIME)?;
+        self.c.flush()?;
         Ok(())
     }
 

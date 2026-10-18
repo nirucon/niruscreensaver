@@ -10,7 +10,7 @@
 # programs.
 set -eu
 
-VERSION="0.3.0"
+VERSION="0.4.0"
 REPO="${NIRUSA_REPO:-nirucon/niruscreensaver}"
 BIN="niruscreensaver"
 PREFIX="${NIRUSA_PREFIX:-$HOME/.local}"
