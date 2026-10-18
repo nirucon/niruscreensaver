@@ -21,6 +21,9 @@ pub struct Config {
     /// Turn the display off this many minutes after the screen locked.
     /// 0 disables it. Read by NIRUIDLE.
     pub dpms_off_minutes: u32,
+    /// Release a lock screen that has had no password for this long.
+    /// 0 disables it. Read by NIRULOCK, multiplied by ten.
+    pub lock_timeout_minutes: u32,
     /// Show "away for ..." once the screen has been idle this long.
     pub show_away_after_seconds: u32,
     pub palette: palette::Palette,
@@ -35,6 +38,7 @@ impl Default for Config {
             idle_minutes: 15,
             lock_after_minutes: 15,
             dpms_off_minutes: 15,
+            lock_timeout_minutes: 5,
             show_away_after_seconds: 60,
             palette: palette::Palette::default(),
         }
@@ -84,6 +88,9 @@ impl Config {
         if let Some(n) = v.get("dpms_off_minutes").and_then(|x| x.as_integer()) {
             cfg.dpms_off_minutes = n.clamp(0, 100_000) as u32;
         }
+        if let Some(n) = v.get("lock_timeout_minutes").and_then(|x| x.as_integer()) {
+            cfg.lock_timeout_minutes = n.clamp(0, 100_000) as u32;
+        }
         if let Some(n) = v
             .get("show_away_after_seconds")
             .and_then(|x| x.as_integer())
@@ -114,7 +121,7 @@ impl Config {
 
     pub fn describe(&self) -> String {
         format!(
-            "config: {}\nidle after: {} min\nlock {} min later\ndisplay off: {} min after locking\naway text after: {} s\nclock size: {}\nfont: {}",
+            "config: {}\nidle after: {} min\nlock {} min later\ndisplay off: {} min after locking\nlock screen gives up after: {} min\naway text after: {} s\nclock size: {}\nfont: {}",
             config_file().display(),
             self.idle_minutes,
             self.lock_after_minutes,
@@ -122,6 +129,11 @@ impl Config {
                 "never".to_string()
             } else {
                 self.dpms_off_minutes.to_string()
+            },
+            if self.lock_timeout_minutes == 0 {
+                "never".to_string()
+            } else {
+                (self.lock_timeout_minutes * 10).to_string()
             },
             self.show_away_after_seconds,
             self.clock_size,

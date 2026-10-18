@@ -65,6 +65,11 @@ clock_size = 88.0
 # How long the session waits before showing this screen.
 idle_minutes = 15
 
+# Lock this many minutes after the screen appears, then give the lock screen
+# this many more minutes before releasing it. 0 disables either step.
+lock_after_minutes = 15
+lock_timeout_minutes = 5
+
 # Turn the display off this many minutes after it appears. 0 disables.
 dpms_off_minutes = 15
 
@@ -79,12 +84,14 @@ border = "2a2a2d"
 focus = "5a5a60"
 ```
 
-`idle_minutes` and `dpms_off_minutes` are read by NIRUWM's session script,
-which starts this program; running it by hand shows the screen immediately.
+These numbers are read by `niruidle` and by `niruwm` itself, and
+`lock_timeout_minutes` is read by `nirulock`, so one file decides when every
+NIRU program sleeps, locks and wakes. Running this program by hand shows the
+screen immediately.
 
 ## Status
 
-Version 0.4.0. Shows the date, time, hostname and away counter.
+Version 0.6.0. Shows the date, time, hostname and away counter.
 
 Missing: password protection (use nirulock), multiple screens, and a preview in
 the settings file.
