@@ -88,10 +88,7 @@ fn idle_seconds(c: &x11rb::rust_connection::RustConnection, root: Window) -> u64
     idle_via_extension(c, root).unwrap_or(0)
 }
 
-fn idle_via_extension(
-    c: &x11rb::rust_connection::RustConnection,
-    root: Window,
-) -> Option<u64> {
+fn idle_via_extension(c: &x11rb::rust_connection::RustConnection, root: Window) -> Option<u64> {
     let ext = c
         .extension_information(x11rb::protocol::screensaver::X11_EXTENSION_NAME)
         .ok()??;

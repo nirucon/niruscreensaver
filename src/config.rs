@@ -84,7 +84,10 @@ impl Config {
         if let Some(n) = v.get("dpms_off_minutes").and_then(|x| x.as_integer()) {
             cfg.dpms_off_minutes = n.clamp(0, 100_000) as u32;
         }
-        if let Some(n) = v.get("show_away_after_seconds").and_then(|x| x.as_integer()) {
+        if let Some(n) = v
+            .get("show_away_after_seconds")
+            .and_then(|x| x.as_integer())
+        {
             cfg.show_away_after_seconds = n.clamp(0, 100_000) as u32;
         }
         if let Some(t) = v.get("palette").and_then(|x| x.as_table()) {
