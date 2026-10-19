@@ -5,6 +5,7 @@
 //! reads the others'. That means installing one, two or all of them is fine.
 
 use crate::{palette, Result};
+use std::path::Path;
 
 pub const DEFAULT_PATH: &str = "screensaver.toml";
 
@@ -26,6 +27,69 @@ pub struct Config {
     /// Show "away for ..." once the screen has been idle this long.
     pub show_away_after_seconds: u32,
     pub palette: palette::Palette,
+}
+
+/// The four built-in suite themes, for a component that does not carry the
+/// theme files itself. Only the text colours are used: the saver and locker
+/// keep an opaque black background so nothing behind them can show through.
+fn builtin_palette(name: &str) -> Option<palette::Palette> {
+    let (foreground, muted, border, focus) = match name {
+        "niru-noir" => (0xe5e5e5, 0xa8a8a8, 0x2a2a2d, 0x5a5a60),
+        "niru-nord" => (0xeceff4, 0x9aa5b1, 0x3b4252, 0x88c0d0),
+        "niru-satie" => (0xdedad4, 0x8f8b86, 0x2a2724, 0xb08d7d),
+        "niru-carl-larsson" => (0x3b3228, 0x7d6f5f, 0xd8cdbb, 0xa63d2f),
+        _ => return None,
+    };
+    Some(palette::Palette {
+        background: 0x000000,
+        foreground,
+        muted,
+        border,
+        focus,
+    })
+}
+
+/// Read the suite's selected theme without requiring it to exist.
+///
+/// A user theme in `~/.config/niruwm/themes/NAME.toml` wins over the built-in
+/// palette, exactly as it does in NIRUWM and NIRUBAR. The background stays
+/// black for the saver and locker; only the content colours follow the theme.
+fn suite_palette_from(base: &Path) -> Option<palette::Palette> {
+    let config = std::fs::read_to_string(base.join("niruwm/config.toml")).ok()?;
+    let value: toml::Value = config.parse().ok()?;
+    let name = value
+        .get("theme")
+        .and_then(|v| v.as_str())
+        .unwrap_or("niru-noir");
+    let file = base.join("niruwm/themes").join(format!("{name}.toml"));
+    if let Ok(text) = std::fs::read_to_string(&file) {
+        if let Ok(theme) = text.parse::<toml::Value>() {
+            let mut result = builtin_palette(name).unwrap_or_default();
+            result.background = 0x000000;
+            let get = |field: &str, fallback: u32| {
+                theme
+                    .get(field)
+                    .and_then(|v| v.as_str())
+                    .and_then(palette::parse_hex)
+                    .unwrap_or(fallback)
+            };
+            result.foreground = get("foreground", result.foreground);
+            result.muted = get("muted", result.muted);
+            result.border = get("border", result.border);
+            result.focus = get("focus", result.focus);
+            return Some(result);
+        }
+    }
+    builtin_palette(name)
+}
+
+fn suite_palette() -> Option<palette::Palette> {
+    let base = std::env::var_os("XDG_CONFIG_HOME")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| {
+            std::path::PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".config")
+        });
+    suite_palette_from(&base)
 }
 
 impl Default for Config {
@@ -64,11 +128,20 @@ impl Config {
         let value: toml::Value = text
             .parse()
             .map_err(|e| format!("{}: {e}", path.display()))?;
-        Self::from_value(&value).map_err(|e| format!("{}: {e}", path.display()).into())
+        Self::from_value_with(&value, suite_palette())
+            .map_err(|e| format!("{}: {e}", path.display()).into())
     }
 
+    #[cfg(test)]
     fn from_value(v: &toml::Value) -> Result<Self> {
+        Self::from_value_with(v, None)
+    }
+
+    fn from_value_with(v: &toml::Value, suite: Option<palette::Palette>) -> Result<Self> {
         let mut cfg = Self::default();
+        if let Some(suite) = suite {
+            cfg.palette = suite;
+        }
         if let Some(t) = v.get("font_path").and_then(|x| x.as_str()) {
             cfg.font_path = Some(t.to_string());
         }
@@ -103,7 +176,7 @@ impl Config {
                     .and_then(palette::parse_hex)
                     .unwrap_or(fallback)
             };
-            let d = palette::Palette::default();
+            let d = cfg.palette.clone();
             cfg.palette = palette::Palette {
                 background: get("background", d.background),
                 foreground: get("foreground", d.foreground),
@@ -163,5 +236,26 @@ mod tests {
         let c = Config::from_value(&v).unwrap();
         assert_eq!(c.palette.background, 0x101010);
         assert_eq!(c.palette.foreground, 0xe5e5e5);
+    }
+
+    #[test]
+    fn suite_theme_supplies_content_colours_but_never_the_background() {
+        let dir = std::env::temp_dir().join(format!("saver-suite-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("niruwm/themes")).unwrap();
+        std::fs::write(dir.join("niruwm/config.toml"), "theme = \"niru-nord\"\n").unwrap();
+        let p = suite_palette_from(&dir).expect("built-in suite theme");
+        assert_eq!(p.background, 0x000000, "the saver must stay opaque");
+        assert_eq!(p.foreground, 0xeceff4);
+        assert_eq!(p.focus, 0x88c0d0);
+        std::fs::write(
+            dir.join("niruwm/themes/niru-nord.toml"),
+            "foreground = \"010203\"\nfocus = \"040506\"\n",
+        )
+        .unwrap();
+        let p = suite_palette_from(&dir).expect("user suite theme");
+        assert_eq!(p.foreground, 0x010203);
+        assert_eq!(p.focus, 0x040506);
+        assert_eq!(p.background, 0x000000);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }

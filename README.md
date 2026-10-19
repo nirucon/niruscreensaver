@@ -88,7 +88,9 @@ neither the saver nor the idle daemon dismisses a lock on a timer.
 
 ## Status
 
-Version 0.8.0. Shows the date, time, hostname and away counter.
+Version 0.8.1. Shows the date, time, hostname and away counter. Content colours
+follow the suite theme selected in `~/.config/niruwm/config.toml`; the background
+stays opaque black.
 
 Part of a personal desktop for the author's own use; others are welcome to try it.
 [Roadmap](https://github.com/nirucon/nirux/blob/main/ROADMAP.md).
