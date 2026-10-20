@@ -1,7 +1,9 @@
 # Niruscreensaver
 
 Small X11 idle screen with date, clock, hostname and away time. Theme-coloured
-content on opaque black. A key or click dismisses it; use **nirulock** for locking.
+content on opaque black. A key or click dismisses it, and root/output resizes keep
+full coverage; use **nirulock** for locking. If the keyboard or pointer grab fails,
+the saver exits instead of claiming success.
 Supports **Void glibc, Debian and Arch Linux**.
 
 ## Install

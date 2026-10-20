@@ -1,6 +1,6 @@
 [package]
 name = "niruscreensaver"
-version = "0.8.1"
+version = "0.8.2"
 edition = "2021"
 rust-version = "1.75"
 license = "MIT"
@@ -8,7 +8,7 @@ description = "Niru Noir idle screen for X11"
 repository = "https://github.com/nirucon/niruscreensaver"
 
 [dependencies]
-x11rb = { version = "0.13", features = ["screensaver"] }
+x11rb = { version = "0.13", features = ["screensaver", "randr"] }
 serde = { version = "1", features = ["derive"] }
 toml = "0.8"
 indexmap = "=2.7.1"

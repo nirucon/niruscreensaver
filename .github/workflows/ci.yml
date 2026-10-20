@@ -16,7 +16,7 @@ jobs:
       - run: sh tests/installer.sh
       - name: Font cache and input dismissal
         run: |
-          sudo apt-get update && sudo apt-get install -y xvfb x11-xserver-utils xdotool fonts-dejavu-core fontconfig procps
+          sudo apt-get update && sudo apt-get install -y xvfb x11-utils x11-xserver-utils xdotool fonts-dejavu-core fontconfig procps
           cargo build --release --locked
           sh tests/resource-check.sh "$PWD/target/release/niruscreensaver"
       - name: Shellcheck

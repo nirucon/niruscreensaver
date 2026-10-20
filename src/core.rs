@@ -11,7 +11,9 @@
 
 use ab_glyph::{Font, ScaleFont};
 use x11rb::{
-    connection::Connection, protocol::xproto::*, rust_connection::RustConnection,
+    connection::Connection,
+    protocol::{randr::ConnectionExt as _, xproto::*},
+    rust_connection::RustConnection,
     wrapper::ConnectionExt as _,
 };
 
@@ -300,6 +302,13 @@ impl Surface {
             name.as_bytes(),
         )?;
         c.map_window(win)?;
+        c.randr_select_input(
+            screen.root,
+            x11rb::protocol::randr::NotifyMask::SCREEN_CHANGE
+                | x11rb::protocol::randr::NotifyMask::CRTC_CHANGE
+                | x11rb::protocol::randr::NotifyMask::OUTPUT_CHANGE
+                | x11rb::protocol::randr::NotifyMask::RESOURCE_CHANGE,
+        )?;
         // Hide the pointer. A glyph cursor with no glyph still drew one pixel,
         // so this is a cursor built from an empty pixmap, which is invisible.
         let blank = c.generate_id()?;
@@ -314,23 +323,34 @@ impl Surface {
         // to the application underneath, and typing a password meant typing
         // into an editor. The grab also stops clicks from reaching anything
         // else while the screen is covered.
-        c.grab_keyboard(
-            true,
-            win,
-            x11rb::CURRENT_TIME,
-            GrabMode::ASYNC,
-            GrabMode::ASYNC,
-        )?;
-        c.grab_pointer(
-            true,
-            win,
-            EventMask::BUTTON_PRESS | EventMask::POINTER_MOTION,
-            GrabMode::ASYNC,
-            GrabMode::ASYNC,
-            x11rb::NONE,
-            x11rb::NONE,
-            x11rb::CURRENT_TIME,
-        )?;
+        let keyboard = c
+            .grab_keyboard(
+                true,
+                win,
+                x11rb::CURRENT_TIME,
+                GrabMode::ASYNC,
+                GrabMode::ASYNC,
+            )?
+            .reply()?;
+        if keyboard.status != GrabStatus::SUCCESS {
+            return Err(format!("cannot grab the keyboard: {:?}", keyboard.status).into());
+        }
+        let pointer = c
+            .grab_pointer(
+                true,
+                win,
+                EventMask::BUTTON_PRESS | EventMask::POINTER_MOTION,
+                GrabMode::ASYNC,
+                GrabMode::ASYNC,
+                x11rb::NONE,
+                x11rb::NONE,
+                x11rb::CURRENT_TIME,
+            )?
+            .reply()?;
+        if pointer.status != GrabStatus::SUCCESS {
+            let _ = c.ungrab_keyboard(x11rb::CURRENT_TIME);
+            return Err(format!("cannot grab the pointer: {:?}", pointer.status).into());
+        }
         c.set_input_focus(InputFocus::PARENT, win, x11rb::CURRENT_TIME)?;
         c.flush()?;
         Ok(Self {
@@ -360,6 +380,37 @@ impl Surface {
             }],
         )?;
         Ok(())
+    }
+
+    /// Follow a root resize or output change and keep full-screen coverage.
+    ///
+    /// The window and backing pixmap are resized atomically as seen by the
+    /// user: one configure request, then a fresh pixmap and a full redraw.
+    pub fn resize(&mut self) -> crate::Result<bool> {
+        let root = self.c.setup().roots[self.screen_num].root;
+        let geometry = self.c.get_geometry(root)?.reply()?;
+        let (width, height) = (geometry.width, geometry.height);
+        if width == self.width && height == self.height {
+            return Ok(false);
+        }
+        self.c.configure_window(
+            self.win,
+            &ConfigureWindowAux::new()
+                .width(u32::from(width))
+                .height(u32::from(height))
+                .stack_mode(StackMode::ABOVE),
+        )?;
+        self.c.free_pixmap(self.back)?;
+        let back = self.c.generate_id()?;
+        self.c
+            .create_pixmap(self.depth, back, root, width, height)?;
+        self.back = back;
+        self.width = width;
+        self.height = height;
+        self.c
+            .set_input_focus(InputFocus::PARENT, self.win, x11rb::CURRENT_TIME)?;
+        self.c.flush()?;
+        Ok(true)
     }
 
     /// Release the keyboard and pointer grabs.

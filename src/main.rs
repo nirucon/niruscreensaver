@@ -169,6 +169,7 @@ pub fn run(cfg: config::Config) -> Result<()> {
     let started = Instant::now();
     let mut repaint_at = Instant::now();
     loop {
+        let root = surface.c.setup().roots[surface.screen_num].root;
         // Drain x11rb's buffered events before blocking on its socket.
         while let Some(event) = surface.c.poll_for_event()? {
             match event {
@@ -181,11 +182,21 @@ pub fn run(cfg: config::Config) -> Result<()> {
                 Event::Expose(_) => {
                     repaint_at = Instant::now();
                 }
+                // A resolution change or monitor hotplug changes the root
+                // geometry; the saver must not leave uncovered pixels.
+                // ConfigureNotify can also be a child window; resize()
+                // compares the actual root geometry and is cheap.
+                Event::RandrScreenChangeNotify(_)
+                | Event::RandrNotify(_)
+                | Event::ConfigureNotify(_)
+                    if surface.resize()? =>
+                {
+                    repaint_at = Instant::now();
+                }
                 _ => {}
             }
         }
         if Instant::now() >= repaint_at {
-            let root = surface.c.setup().roots[surface.screen_num].root;
             let idle =
                 idle_via_extension(&surface.c, root).unwrap_or_else(|| started.elapsed().as_secs());
             draw(&mut surface, &cfg, &mut text, &mut big, &hostname, idle)?;
