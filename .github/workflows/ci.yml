@@ -13,6 +13,7 @@ jobs:
       - run: cargo fmt --check
       - run: cargo clippy --locked --all-targets -- -D warnings
       - run: cargo test --locked
+      - run: sh tests/installer.sh
       - name: Font cache and input dismissal
         run: |
           sudo apt-get update && sudo apt-get install -y xvfb x11-xserver-utils xdotool fonts-dejavu-core fontconfig procps
@@ -21,4 +22,4 @@ jobs:
       - name: Shellcheck
         run: |
           docker run --rm -v "$PWD":/src:ro koalaman/shellcheck:stable \
-            -S warning -s sh -e SC1007 /src/install.sh
+            -S warning -s sh -e SC1007 /src/install.sh /src/tests/installer.sh

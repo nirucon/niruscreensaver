@@ -10,7 +10,7 @@
 # programs.
 set -eu
 
-VERSION="0.7.0"
+VERSION="0.8.1"
 REPO="${NIRUSA_REPO:-nirucon/niruscreensaver}"
 BIN="niruscreensaver"
 PREFIX="${NIRUSA_PREFIX:-$HOME/.local}"
@@ -21,6 +21,14 @@ MANIFEST="$STATEDIR/manifest.tsv"
 
 die() { printf 'niruscreensaver install: %s\n' "$*" >&2; exit 1; }
 say() { printf '%s\n' "$*"; }
+
+guard_nirux() {
+  if [ -L "$1" ]; then
+    case "$(readlink "$1")" in
+      *share/nirux/current/bin/*) die "managed by NIRUX: $1 (use nirux update)" ;;
+    esac
+  fi
+}
 
 usage() {
   cat <<'EOF'
@@ -55,6 +63,7 @@ sha256() {
 
 put() {
   src="$1"; dest="$2"; mode="${3:-0755}"
+  guard_nirux "$dest"
   mkdir -p "$(dirname "$dest")"
   install -m "$mode" "$src" "$dest.new"
   mv -f "$dest.new" "$dest"
@@ -107,10 +116,15 @@ check() {
 
 uninstall() {
   [ -f "$MANIFEST" ] || { say "Nothing to remove."; return 0; }
-  while IFS="$(printf '\t')" read -r path _hash; do
+  while IFS="$(printf '\t')" read -r path hash; do
     [ -n "$path" ] || continue
     case "$path" in
-      */niruscreensaver) [ -e "$path" ] && rm -f "$path" && say "Removed $path" ;;
+      "$BINDIR/$BIN")
+        guard_nirux "$path"
+        if [ -f "$path" ]; then
+          if [ "$(sha256 "$path")" = "$hash" ]; then rm -f "$path"; say "Removed $path"
+          else say "Keeping modified file: $path"; fi
+        fi ;;
       *) say "Skipping unexpected entry: $path" ;;
     esac
   done < "$MANIFEST"
@@ -132,6 +146,7 @@ while [ $# -gt 0 ]; do
 done
 
 cd "$(dirname "$0")"
+case "$MODE" in install|build|uninstall) guard_nirux "$BINDIR/$BIN" ;; esac
 case "$MODE" in
   install) install_release ;;
   build) build_local ;;

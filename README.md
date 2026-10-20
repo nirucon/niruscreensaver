@@ -1,43 +1,13 @@
 # Niruscreensaver
 
-A dark idle screen for X11, showing the date, the time, the hostname and how
-long the machine has been away.
-
-Part of a small set of programs that share one look. Each works on its own:
-
-- [niruwm](https://github.com/nirucon/niruwm), the window manager
-- [nirubar](https://github.com/nirucon/nirubar), the status bar
-- [nirulock](https://github.com/nirucon/nirulock), the lock screen
-
-**A personal hobby project.** I build this for my own machines. It is public so
-others can read it and try it, but there is no support promise. Early software,
-used at your own risk.
-
-## What it is
-
-A full screen, Niru Noir dark, with white text. No animation, no graphics.
-Just the clock. A key press or a click dismisses it.
-
-It does not lock the screen. For that, use [nirulock](https://github.com/nirucon/nirulock).
-
-## How it works
-
-The program draws one window that covers the screen, then waits. It redraws
-only when the minute changes, so an idle screensaver uses no CPU. It reads the
-idle time from the X server, and the time from the system clock. No compositor
-and no GPU are needed.
-
-Starting and stopping it is up to the session, not the program. NIRUWM's
-session script does it; from a terminal:
-
-```sh
-niruscreensaver          # show it now
-niruscreensaver --config # print the settings in use
-```
+Small X11 idle screen with date, clock, hostname and away time. Theme-coloured
+content on opaque black. A key or click dismisses it; use **nirulock** for locking.
+Supports **Void glibc, Debian and Arch Linux**.
 
 ## Install
 
-Releases contain a static x86_64 binary, so no Rust is needed.
+Use [NIRUX](https://github.com/nirucon/nirux#install) for the complete desktop,
+or install the standalone x86_64/glibc release:
 
 ```sh
 git clone https://github.com/nirucon/niruscreensaver
@@ -45,64 +15,25 @@ cd niruscreensaver
 ./install.sh
 ```
 
-To build from source (Rust 1.75 or newer):
+`./install.sh --build` needs Rust 1.75+, a C linker, fontconfig and a monospace
+font. Prefix: `~/.local` (`--prefix DIR` overrides). NIRUX-owned binaries must be
+maintained with `nirux update`.
+
+## Use and settings
 
 ```sh
-./install.sh --build
+niruscreensaver          # show immediately
+niruscreensaver --config # print settings
 ```
 
-It installs to `~/.local/bin`. Add `--prefix DIR` to change that.
+Settings: `~/.config/niruui/screensaver.toml` (XDG respected).
+`idle_minutes`, `lock_after_minutes` and `dpms_off_minutes` are read by niruidle.
+Legacy `lock_timeout_minutes` is ignored. A lock never expires automatically.
+Colours follow the selected `~/.config/niruwm/config.toml` theme; optional
+`[palette]` overrides affect content. Fonts and hostname are cached; drawing
+follows visible clock/away changes and X events.
 
-## Settings
-
-`~/.config/niruui/screensaver.toml`. Everything is optional.
-
-```toml
-font_path = "/path/to/monospace.ttf"  # default: fontconfig lookup
-font_size = 22.0
-clock_size = 88.0
-
-# How long the session waits before showing this screen.
-idle_minutes = 15
-
-# Lock this many minutes after the screen appears. 0 disables this step.
-lock_after_minutes = 15
-
-# Turn the display off this many minutes after locking. 0 disables.
-dpms_off_minutes = 15
-
-# Show "away for ..." after this many idle seconds.
-show_away_after_seconds = 60
-
-[palette]
-background = "0f0f10"
-foreground = "e5e5e5"
-muted = "a8a8a8"
-border = "2a2a2d"
-focus = "5a5a60"
-```
-
-The idle ladder is read by `niruidle`. Running this program by hand shows the
-screen immediately. Legacy `lock_timeout_minutes` is accepted but ignored:
-neither the saver nor the idle daemon dismisses a lock on a timer.
-
-## Status
-
-Version 0.8.1. Shows the date, time, hostname and away counter. Content colours
-follow the suite theme selected in `~/.config/niruwm/config.toml`; the background
-stays opaque black.
-
-Part of a personal desktop for the author's own use; others are welcome to try it.
-[Roadmap](https://github.com/nirucon/nirux/blob/main/ROADMAP.md).
-Fonts/hostname are cached for the run; redraws follow clock/away deadlines or X events.
-
-Missing: password protection (use nirulock), multiple screens, and a preview in
-the settings file.
-
-## Build needs
-
-Rust 1.75 or newer, a C linker, `fontconfig` and a monospace font.
-
-## License
+[Roadmap](https://github.com/nirucon/nirux/blob/main/ROADMAP.md) ·
+[Resource test](tests/resource-check.sh) · [Installer test](tests/installer.sh)
 
 MIT. Copyright 2026 Nicklas Rudolfsson.
