@@ -1,9 +1,10 @@
 # NIRUSCREENSAVER
 
-Small X11 idle screen for the NIRU desktop, showing date, clock, hostname and
+**Part of [NIRUX - A minimal X11 desktop by Nicklas Rudolfsson](https://github.com/nirucon/nirux).**
+
+**Early beta.** Small X11 idle screen for the NIRU desktop, showing date, clock, hostname and
 away time in the active theme on an opaque black background.
 
-Part of the [NIRUX suite](https://github.com/nirucon/nirux): [NIRUWM](https://github.com/nirucon/niruwm) · [NIRUBAR](https://github.com/nirucon/nirubar) · [NIRUSCREENSAVER](https://github.com/nirucon/niruscreensaver) · [NIRULOCK](https://github.com/nirucon/nirulock) · [NIRULAUNCHER](https://github.com/nirucon/nirulauncher) · [NIRUNOTIFY](https://github.com/nirucon/nirunotify) · [NIRUSHOT](https://github.com/nirucon/nirushot).
 
 ## Install
 
@@ -36,6 +37,10 @@ Settings live in `~/.config/niruui/screensaver.toml` (XDG respected).
 `niruidle`. A lock never expires automatically. Colours follow the selected
 theme in `~/.config/niruwm/config.toml`; optional `[palette]` overrides affect
 content only.
+
+## NIRUX suite
+
+[NIRUX](https://github.com/nirucon/nirux) · [NIRUWM](https://github.com/nirucon/niruwm) · [NIRUBAR](https://github.com/nirucon/nirubar) · [NIRUSCREENSAVER](https://github.com/nirucon/niruscreensaver) · [NIRULOCK](https://github.com/nirucon/nirulock) · [NIRULAUNCHER](https://github.com/nirucon/nirulauncher) · [NIRUNOTIFY](https://github.com/nirucon/nirunotify) · [NIRUSHOT](https://github.com/nirucon/nirushot)
 
 ## Development
 
