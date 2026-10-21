@@ -1,10 +1,9 @@
-# Niruscreensaver
+# NIRUSCREENSAVER
 
-Small X11 idle screen with date, clock, hostname and away time. Theme-coloured
-content on opaque black. A key or click dismisses it, and root/output resizes keep
-full coverage; use **nirulock** for locking. If the keyboard or pointer grab fails,
-the saver exits instead of claiming success.
-Supports **Void glibc, Debian and Arch Linux**.
+Small X11 idle screen for the NIRU desktop, showing date, clock, hostname and
+away time in the active theme on an opaque black background.
+
+Part of the [NIRUX suite](https://github.com/nirucon/nirux): [NIRUWM](https://github.com/nirucon/niruwm) · [NIRUBAR](https://github.com/nirucon/nirubar) · [NIRUSCREENSAVER](https://github.com/nirucon/niruscreensaver) · [NIRULOCK](https://github.com/nirucon/nirulock) · [NIRULAUNCHER](https://github.com/nirucon/nirulauncher) · [NIRUNOTIFY](https://github.com/nirucon/nirunotify) · [NIRUSHOT](https://github.com/nirucon/nirushot).
 
 ## Install
 
@@ -18,24 +17,33 @@ cd niruscreensaver
 ```
 
 `./install.sh --build` needs Rust 1.75+, a C linker, fontconfig and a monospace
-font. Prefix: `~/.local` (`--prefix DIR` overrides). NIRUX-owned binaries must be
+font. Prefix: `~/.local`; `--prefix DIR` overrides it. NIRUX-owned binaries are
 maintained with `nirux update`.
 
-## Use and settings
+## Use
 
 ```sh
-niruscreensaver          # show immediately
-niruscreensaver --config # print settings
+niruscreensaver
+niruscreensaver --config
 ```
 
-Settings: `~/.config/niruui/screensaver.toml` (XDG respected).
-`idle_minutes`, `lock_after_minutes` and `dpms_off_minutes` are read by niruidle.
-Legacy `lock_timeout_minutes` is ignored. A lock never expires automatically.
-Colours follow the selected `~/.config/niruwm/config.toml` theme; optional
-`[palette]` overrides affect content. Fonts and hostname are cached; drawing
-follows visible clock/away changes and X events.
+A key or click dismisses the screen. Root and output resizes keep full coverage.
+If the keyboard or pointer grab fails, the saver exits instead of claiming
+success. Use [NIRULOCK](https://github.com/nirucon/nirulock) for locking.
 
-[Roadmap](https://github.com/nirucon/nirux/blob/main/ROADMAP.md) ·
-[Resource test](tests/resource-check.sh) · [Installer test](tests/installer.sh)
+Settings live in `~/.config/niruui/screensaver.toml` (XDG respected).
+`idle_minutes`, `lock_after_minutes` and `dpms_off_minutes` are read by
+`niruidle`. A lock never expires automatically. Colours follow the selected
+theme in `~/.config/niruwm/config.toml`; optional `[palette]` overrides affect
+content only.
+
+## Development
+
+```sh
+cargo fmt --check
+cargo clippy --all-targets -- -D warnings
+cargo test
+sh tests/resource-check.sh
+```
 
 MIT. Copyright 2026 Nicklas Rudolfsson.
