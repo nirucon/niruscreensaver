@@ -38,6 +38,19 @@ Settings live in `~/.config/niruui/screensaver.toml` (XDG respected).
 theme in `~/.config/niruwm/config.toml`; optional `[palette]` overrides affect
 content only.
 
+### Layouts
+
+Choose one with `layout = "minimal" | "terminal" | "runic" | "corner"`:
+
+- `minimal` — the original large centred clock and hostname.
+- `terminal` — left-aligned monospace idle screen with a `hostname:~$ idle` line.
+- `runic` — the clock with a discreet rune row when a runic font is available.
+- `corner` — clock top-left, hostname and away time at the bottom.
+
+Layout only changes composition; the NIRUX theme still owns colours. The screen
+stays opaque black. A missing runic font omits the ornament, never draws empty
+glyph boxes. See [config.example.toml](config.example.toml).
+
 ## NIRUX suite
 
 [NIRUX](https://github.com/nirucon/nirux) · [NIRUWM](https://github.com/nirucon/niruwm) · [NIRUBAR](https://github.com/nirucon/nirubar) · [NIRUSCREENSAVER](https://github.com/nirucon/niruscreensaver) · [NIRULOCK](https://github.com/nirucon/nirulock) · [NIRULAUNCHER](https://github.com/nirucon/nirulauncher) · [NIRUNOTIFY](https://github.com/nirucon/nirunotify) · [NIRUSHOT](https://github.com/nirucon/nirushot)

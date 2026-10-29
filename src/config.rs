@@ -9,10 +9,41 @@ use std::path::Path;
 
 pub const DEFAULT_PATH: &str = "screensaver.toml";
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Layout {
+    Minimal,
+    Terminal,
+    Runic,
+    Corner,
+}
+
+impl Layout {
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "minimal" => Some(Self::Minimal),
+            "terminal" => Some(Self::Terminal),
+            "runic" => Some(Self::Runic),
+            "corner" => Some(Self::Corner),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Minimal => "minimal",
+            Self::Terminal => "terminal",
+            Self::Runic => "runic",
+            Self::Corner => "corner",
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Config {
     pub font_path: Option<String>,
+    pub rune_font_path: Option<String>,
     pub font_size: f32,
+    pub layout: Layout,
     pub clock_size: f32,
     /// Start the screensaver after this many minutes of idle time.
     pub idle_minutes: u32,
@@ -198,7 +229,9 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             font_path: None,
+            rune_font_path: None,
             font_size: 22.0,
+            layout: Layout::Minimal,
             clock_size: 88.0,
             idle_minutes: 15,
             lock_after_minutes: 15,
@@ -252,6 +285,13 @@ impl Config {
         }
         if let Some(n) = v.get("font_size").and_then(|x| x.as_float()) {
             cfg.font_size = n as f32;
+        }
+        if let Some(layout) = v.get("layout").and_then(|x| x.as_str()) {
+            cfg.layout = Layout::parse(layout)
+                .ok_or_else(|| "layout must be minimal, terminal, runic or corner".to_string())?;
+        }
+        if let Some(t) = v.get("rune_font_path").and_then(|x| x.as_str()) {
+            cfg.rune_font_path = Some(t.to_string());
         }
         if let Some(n) = v.get("clock_size").and_then(|x| x.as_float()) {
             cfg.clock_size = n as f32;
@@ -318,7 +358,7 @@ impl Config {
 
     pub fn describe(&self) -> String {
         format!(
-            "config: {}\nidle after: {} min\nlock {} min later\ndisplay off: {} min after locking\nlegacy lock_timeout_minutes: {} (ignored)\naway text after: {} s\nclock size: {}\nfont: {}",
+            "config: {}\nidle after: {} min\nlock {} min later\ndisplay off: {} min after locking\nlegacy lock_timeout_minutes: {} (ignored)\naway text after: {} s\nclock size: {}\nfont: {}\nlayout: {}\nrune font: {}",
             config_file().display(),
             self.idle_minutes,
             self.lock_after_minutes,
@@ -331,6 +371,8 @@ impl Config {
             self.show_away_after_seconds,
             self.clock_size,
             self.font_path.as_deref().unwrap_or("auto"),
+            self.layout.as_str(),
+            self.rune_font_path.as_deref().unwrap_or("auto"),
         )
     }
 }
@@ -353,6 +395,15 @@ mod tests {
         let c = Config::from_value(&v).unwrap();
         assert_eq!(c.idle_minutes, 5);
         assert_eq!(c.dpms_off_minutes, 15);
+    }
+
+    #[test]
+    fn layouts_parse_and_unknown_is_rejected() {
+        assert_eq!(Layout::parse("minimal"), Some(Layout::Minimal));
+        assert_eq!(Layout::parse("TERMINAL"), Some(Layout::Terminal));
+        assert_eq!(Layout::parse("runic"), Some(Layout::Runic));
+        assert_eq!(Layout::parse("corner"), Some(Layout::Corner));
+        assert!(Layout::parse("noir-ish").is_none());
     }
 
     #[test]

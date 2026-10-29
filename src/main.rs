@@ -96,59 +96,116 @@ fn draw(
     cfg: &config::Config,
     text: &mut core::TextRenderer,
     big: &mut core::TextRenderer,
+    rune: Option<&mut core::TextRenderer>,
     hostname: &str,
     idle: u64,
 ) -> Result<()> {
     let pal = &cfg.palette;
-
     surface.clear(pal.background)?;
-
     let centre_x = (surface.width / 2) as i16;
     let line = text.line_height();
-    let clock_baseline = (surface.height / 2) as i16 - line;
     let big_line = big.line_height();
-
-    big.draw_centred(
-        &surface.c,
-        surface.gc,
-        surface.back,
-        surface.depth,
-        centre_x,
-        clock_baseline,
-        &core::clock_text(Local::now()),
-        pal.foreground,
-        pal.background,
-    )?;
-
-    // Hostname under the clock.
-    let host_baseline = clock_baseline + big_line;
-    text.draw_centred(
-        &surface.c,
-        surface.gc,
-        surface.back,
-        surface.depth,
-        centre_x,
-        host_baseline,
-        hostname,
-        pal.muted,
-        pal.background,
-    )?;
-
-    // Idle counter, only when the screen has been idle for a while.
-    if idle >= u64::from(cfg.show_away_after_seconds) {
-        text.draw_centred(
-            &surface.c,
-            surface.gc,
-            surface.back,
-            surface.depth,
-            centre_x,
-            host_baseline + line * 2,
-            &core::away_text(idle),
-            pal.border.max(pal.focus),
-            pal.background,
-        )?;
+    let width = i32::from(surface.width);
+    let height = i32::from(surface.height);
+    let left = |offset: i32| offset.clamp(i16::MIN as i32, i16::MAX as i32) as i16;
+    let top = |offset: i32| offset.clamp(i16::MIN as i32, i16::MAX as i32) as i16;
+    let show_away = idle >= u64::from(cfg.show_away_after_seconds);
+    let away = core::away_text(idle);
+    match cfg.layout {
+        config::Layout::Minimal => {
+            let clock_baseline = (surface.height / 2) as i16 - line;
+            big.draw_centred(
+                &surface.c, surface.gc, surface.back, surface.depth,
+                centre_x, clock_baseline, &core::clock_text(Local::now()),
+                pal.foreground, pal.background,
+            )?;
+            let host_baseline = clock_baseline + big_line;
+            text.draw_centred(
+                &surface.c, surface.gc, surface.back, surface.depth,
+                centre_x, host_baseline, hostname, pal.muted, pal.background,
+            )?;
+            if show_away {
+                text.draw_centred(
+                    &surface.c, surface.gc, surface.back, surface.depth,
+                    centre_x, host_baseline + line * 2, &away,
+                    pal.border.max(pal.focus), pal.background,
+                )?;
+            }
+        }
+        config::Layout::Terminal => {
+            let x = left((width / 10).max(24));
+            let start = top((height / 3).max(i32::from(big_line) * 2));
+            text.draw_left(
+                &surface.c, surface.gc, surface.back, surface.depth,
+                x, start, &format!("{hostname}:~$ idle"), pal.muted, pal.background,
+            )?;
+            big.draw_left(
+                &surface.c, surface.gc, surface.back, surface.depth,
+                x, start + big_line * 2, &core::clock_text(Local::now()),
+                pal.foreground, pal.background,
+            )?;
+            if show_away {
+                text.draw_left(
+                    &surface.c, surface.gc, surface.back, surface.depth,
+                    x, start + big_line * 2 + line * 2, &away,
+                    pal.border.max(pal.focus), pal.background,
+                )?;
+            }
+        }
+        config::Layout::Runic => {
+            let clock_baseline = (surface.height / 2) as i16 - line;
+            if let Some(rune) = rune {
+                rune.draw_centred(
+                    &surface.c, surface.gc, surface.back, surface.depth,
+                    centre_x, clock_baseline - line * 3,
+                    "ᚠ  ᚢ  ᚦ  ᚨ  ᚱ  ᚲ  ᚷ  ᚹ",
+                    pal.border.max(pal.focus), pal.background,
+                )?;
+            }
+            big.draw_centred(
+                &surface.c, surface.gc, surface.back, surface.depth,
+                centre_x, clock_baseline, &core::clock_text(Local::now()),
+                pal.foreground, pal.background,
+            )?;
+            let host_baseline = clock_baseline + big_line;
+            text.draw_centred(
+                &surface.c, surface.gc, surface.back, surface.depth,
+                centre_x, host_baseline, hostname, pal.muted, pal.background,
+            )?;
+            if show_away {
+                text.draw_centred(
+                    &surface.c, surface.gc, surface.back, surface.depth,
+                    centre_x, host_baseline + line * 2, &away,
+                    pal.border.max(pal.focus), pal.background,
+                )?;
+            }
+        }
+        config::Layout::Corner => {
+            let margin = (width / 10).max(16);
+            let left_x = left(margin);
+            let right_x = left(width - margin);
+            let top_y = top(margin + i32::from(big_line));
+            let bottom_y = top(height - margin - i32::from(line));
+            big.draw_left(
+                &surface.c, surface.gc, surface.back, surface.depth,
+                left_x, top_y, &core::clock_text(Local::now()),
+                pal.foreground, pal.background,
+            )?;
+            text.draw_left(
+                &surface.c, surface.gc, surface.back, surface.depth,
+                left_x, bottom_y.saturating_sub(line * 2), hostname,
+                pal.muted, pal.background,
+            )?;
+            if show_away {
+                let away_width = text.width(&away);
+                text.draw_left(
+                    &surface.c, surface.gc, surface.back, surface.depth,
+                    right_x.saturating_sub(away_width), bottom_y, &away,
+                    pal.border.max(pal.focus), pal.background,
+                )?;
+            }
+        }
     }
-
     surface.present()?;
     Ok(())
 }
@@ -165,6 +222,9 @@ pub fn run(cfg: config::Config) -> Result<()> {
     let setup = surface.c.setup().clone();
     let mut text = core::TextRenderer::new(&font, cfg.font_size, &setup)?;
     let mut big = text.at_size(cfg.clock_size);
+    let mut rune = core::find_rune_font(cfg.rune_font_path.as_deref())
+        .map(|font| core::TextRenderer::new(&font, (cfg.font_size * 2.2).min(cfg.clock_size * 0.6), &setup))
+        .transpose()?;
     let hostname = core::hostname();
     let started = Instant::now();
     let mut repaint_at = Instant::now();
@@ -199,7 +259,7 @@ pub fn run(cfg: config::Config) -> Result<()> {
         if Instant::now() >= repaint_at {
             let idle =
                 idle_via_extension(&surface.c, root).unwrap_or_else(|| started.elapsed().as_secs());
-            draw(&mut surface, &cfg, &mut text, &mut big, &hostname, idle)?;
+            draw(&mut surface, &cfg, &mut text, &mut big, rune.as_mut(), &hostname, idle)?;
             let ms = next_redraw_ms(
                 Local::now().timestamp_millis(),
                 idle,
