@@ -289,10 +289,7 @@ fn draw(
             }
         }
         config::Layout::Cava => {
-            let spec_w = ((width as f32 * 0.58) as i32).clamp(320, 1100) as u16;
-            let spec_h = ((height as f32 * 0.17) as i32).clamp(96, 210) as u16;
-            let spec_x = left((width - i32::from(spec_w)) / 2);
-            let spec_y = top((height - i32::from(spec_h)) / 2);
+            let (spec_x, spec_y, spec_w, spec_h) = cava_rect(surface);
             let clock_baseline = spec_y.saturating_sub(line * 2);
             big.draw_centred(
                 &surface.c,
@@ -340,6 +337,34 @@ fn draw(
     Ok(())
 }
 
+fn cava_rect(surface: &core::Surface) -> (i16, i16, u16, u16) {
+    let width = i32::from(surface.width);
+    let height = i32::from(surface.height);
+    let spec_w = ((width as f32 * 0.58) as i32).clamp(320, 1100) as u16;
+    let spec_h = ((height as f32 * 0.17) as i32).clamp(96, 210) as u16;
+    let spec_x = ((width - i32::from(spec_w)) / 2).clamp(i16::MIN as i32, i16::MAX as i32) as i16;
+    let spec_y = ((height - i32::from(spec_h)) / 2).clamp(i16::MIN as i32, i16::MAX as i32) as i16;
+    (spec_x, spec_y, spec_w, spec_h)
+}
+
+fn draw_cava_frame(
+    surface: &core::Surface,
+    cfg: &config::Config,
+    cava: &mut Option<cava::Cava>,
+) -> Result<()> {
+    if cfg.layout != config::Layout::Cava {
+        return Ok(());
+    }
+    let Some(cava) = cava.as_mut() else {
+        return Ok(());
+    };
+    let (x, y, width, height) = cava_rect(surface);
+    let values = cava.values().to_vec();
+    cava::paint(surface, &cfg.palette, x, y, width, height, &values)?;
+    surface.present_rect(x, y, width, height)?;
+    Ok(())
+}
+
 /// Run the screensaver until a key or button dismisses it.
 ///
 /// Wait for X input or the next visible clock/away deadline, not a polling tick.
@@ -369,6 +394,7 @@ pub fn run(cfg: config::Config) -> Result<()> {
     };
     let started = Instant::now();
     let mut repaint_at = Instant::now();
+    let mut next_full = Instant::now();
     loop {
         let root = surface.c.setup().roots[surface.screen_num].root;
         // Drain x11rb's buffered events before blocking on its socket.
@@ -382,6 +408,7 @@ pub fn run(cfg: config::Config) -> Result<()> {
                 }
                 Event::Expose(_) => {
                     repaint_at = Instant::now();
+                    next_full = Instant::now();
                 }
                 // A resolution change or monitor hotplug changes the root
                 // geometry; the saver must not leave uncovered pixels.
@@ -393,34 +420,44 @@ pub fn run(cfg: config::Config) -> Result<()> {
                     if surface.resize()? =>
                 {
                     repaint_at = Instant::now();
+                    next_full = Instant::now();
                 }
                 _ => {}
             }
         }
-        if Instant::now() >= repaint_at {
+        let now = Instant::now();
+        if now >= repaint_at {
             let idle =
                 idle_via_extension(&surface.c, root).unwrap_or_else(|| started.elapsed().as_secs());
-            let spectrum = cava.as_mut().map(|cava| cava.values().to_vec());
-            draw(
-                &mut surface,
-                &cfg,
-                &mut text,
-                &mut big,
-                rune.as_mut(),
-                &hostname,
-                idle,
-                spectrum.as_deref(),
-            )?;
-            let ms = if cava.as_ref().is_some_and(cava::Cava::running) {
-                33
+            let cava_active = cava.as_ref().is_some_and(cava::Cava::running);
+            if cava_active && now < next_full {
+                draw_cava_frame(&surface, &cfg, &mut cava)?;
+                repaint_at = now + Duration::from_millis(33);
             } else {
-                next_redraw_ms(
+                let spectrum = cava.as_mut().map(|cava| cava.values().to_vec());
+                draw(
+                    &mut surface,
+                    &cfg,
+                    &mut text,
+                    &mut big,
+                    rune.as_mut(),
+                    &hostname,
+                    idle,
+                    spectrum.as_deref(),
+                )?;
+                let ms = next_redraw_ms(
                     Local::now().timestamp_millis(),
                     idle,
                     cfg.show_away_after_seconds,
-                )
-            };
-            repaint_at = Instant::now() + Duration::from_millis(ms);
+                );
+                next_full = now + Duration::from_millis(ms);
+                repaint_at = now
+                    + if cava_active {
+                        Duration::from_millis(33)
+                    } else {
+                        Duration::from_millis(ms)
+                    };
+            }
         }
         surface.c.flush()?;
         let timeout = repaint_at

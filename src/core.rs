@@ -318,7 +318,10 @@ impl Surface {
                 .background_pixel(0x000000)
                 .event_mask(EventMask::EXPOSURE | EventMask::KEY_PRESS | EventMask::BUTTON_PRESS),
         )?;
-        c.create_gc(gc, win, &CreateGCAux::new())?;
+        // CopyArea must not generate GraphicsExpose/NoExposure events. Every
+        // CAVA frame copies a rectangle; leaving exposures enabled made the
+        // event loop spin at hundreds of frames per second.
+        c.create_gc(gc, win, &CreateGCAux::new().graphics_exposures(0))?;
         c.create_pixmap(depth, back, screen.root, width, height)?;
         c.change_property8(
             PropMode::REPLACE,
@@ -437,6 +440,14 @@ impl Surface {
             .set_input_focus(InputFocus::PARENT, self.win, x11rb::CURRENT_TIME)?;
         self.c.flush()?;
         Ok(true)
+    }
+
+    /// Copy only one rectangle from the backing pixmap to the screen.
+    pub fn present_rect(&self, x: i16, y: i16, width: u16, height: u16) -> crate::Result<()> {
+        self.c
+            .copy_area(self.back, self.win, self.gc, x, y, x, y, width, height)?;
+        self.c.flush()?;
+        Ok(())
     }
 
     /// Release the keyboard and pointer grabs.

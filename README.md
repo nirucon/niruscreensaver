@@ -50,8 +50,10 @@ Choose one with `layout = "minimal" | "terminal" | "runic" | "corner" | "cava"`:
 
 The `cava` layout samples system audio through [CAVA](https://github.com/karlstav/cava)
 at 30 frames per second and uses the same fast-attack, slower-release smoothing
-as NIRUAMP. Bars are drawn from the active NIRUX theme's focus colour, with a
-lighter peak, so the spectrum follows every suite theme. Set `visualizer = false`
+as NIRUAMP. Only the spectrum rectangle is repainted between full clock frames,
+and CopyArea exposures are disabled, so an idle screen does not burn CPU or spin
+the event loop. Bars are drawn from the active NIRUX theme's focus colour, with
+a lighter peak, so the spectrum follows every suite theme. Set `visualizer = false`
 to keep the cava composition without the spectrum. If CAVA is not installed, the
 clock and hostname are still shown; install `cava` to enable the bars.
 
