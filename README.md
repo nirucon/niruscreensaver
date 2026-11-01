@@ -2,8 +2,8 @@
 
 **Part of [NIRUX - A minimal X11 desktop by Nicklas Rudolfsson](https://github.com/nirucon/nirux).**
 
-**Early beta.** Small X11 idle screen for the NIRU desktop, showing date, clock, hostname and
-away time in the active theme on an opaque black background.
+**Early beta.** Small X11 idle screen for the NIRU desktop, showing date, clock, hostname,
+away time and an optional CAVA spectrum in the active theme on an opaque black background.
 
 
 ## Install
@@ -40,12 +40,20 @@ content only.
 
 ### Layouts
 
-Choose one with `layout = "minimal" | "terminal" | "runic" | "corner"`:
+Choose one with `layout = "minimal" | "terminal" | "runic" | "corner" | "cava"`:
 
+- `cava` — the default: large clock and hostname above a live CAVA spectrum.
 - `minimal` — the original large centred clock and hostname.
 - `terminal` — left-aligned monospace idle screen with a `hostname:~$ idle` line.
 - `runic` — the clock with a discreet rune row when a runic font is available.
 - `corner` — clock top-left, hostname and away time at the bottom.
+
+The `cava` layout samples system audio through [CAVA](https://github.com/karlstav/cava)
+at 30 frames per second and uses the same fast-attack, slower-release smoothing
+as NIRUAMP. Bars are drawn from the active NIRUX theme's focus colour, with a
+lighter peak, so the spectrum follows every suite theme. Set `visualizer = false`
+to keep the cava composition without the spectrum. If CAVA is not installed, the
+clock and hostname are still shown; install `cava` to enable the bars.
 
 Layout only changes composition; the NIRUX theme still owns colours. The screen
 stays opaque black. A missing runic font omits the ornament, never draws empty

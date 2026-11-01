@@ -105,7 +105,17 @@ impl TextRenderer {
         bg: u32,
     ) -> crate::Result<()> {
         let width = self.width(text);
-        self.draw_left(c, gc, target, depth, centre_x - width / 2, baseline, text, fg, bg)
+        self.draw_left(
+            c,
+            gc,
+            target,
+            depth,
+            centre_x - width / 2,
+            baseline,
+            text,
+            fg,
+            bg,
+        )
     }
 
     #[allow(clippy::too_many_arguments)]

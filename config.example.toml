@@ -3,8 +3,10 @@
 font_size = 22.0
 clock_size = 88.0
 
-# minimal | terminal | runic | corner
-layout = "minimal"
+# minimal | terminal | runic | corner | cava
+# cava uses the active NIRUX theme and visualises system audio through CAVA.
+layout = "cava"
+visualizer = true
 
 # Optional: use a specific runic font. Missing rune fonts simply omit the
 # ornament; the saver never draws missing-glyph boxes.

@@ -11,6 +11,7 @@
 //! niruscreensaver --config      print the effective configuration
 //! ```
 
+mod cava;
 mod config;
 mod core;
 mod palette;
@@ -91,6 +92,7 @@ fn idle_via_extension(c: &x11rb::rust_connection::RustConnection, root: Window) 
     Some(u64::from(info.ms_since_user_input) / 1000)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn draw(
     surface: &mut core::Surface,
     cfg: &config::Config,
@@ -99,6 +101,7 @@ fn draw(
     rune: Option<&mut core::TextRenderer>,
     hostname: &str,
     idle: u64,
+    spectrum: Option<&[f32]>,
 ) -> Result<()> {
     let pal = &cfg.palette;
     surface.clear(pal.background)?;
@@ -115,20 +118,39 @@ fn draw(
         config::Layout::Minimal => {
             let clock_baseline = (surface.height / 2) as i16 - line;
             big.draw_centred(
-                &surface.c, surface.gc, surface.back, surface.depth,
-                centre_x, clock_baseline, &core::clock_text(Local::now()),
-                pal.foreground, pal.background,
+                &surface.c,
+                surface.gc,
+                surface.back,
+                surface.depth,
+                centre_x,
+                clock_baseline,
+                &core::clock_text(Local::now()),
+                pal.foreground,
+                pal.background,
             )?;
             let host_baseline = clock_baseline + big_line;
             text.draw_centred(
-                &surface.c, surface.gc, surface.back, surface.depth,
-                centre_x, host_baseline, hostname, pal.muted, pal.background,
+                &surface.c,
+                surface.gc,
+                surface.back,
+                surface.depth,
+                centre_x,
+                host_baseline,
+                hostname,
+                pal.muted,
+                pal.background,
             )?;
             if show_away {
                 text.draw_centred(
-                    &surface.c, surface.gc, surface.back, surface.depth,
-                    centre_x, host_baseline + line * 2, &away,
-                    pal.border.max(pal.focus), pal.background,
+                    &surface.c,
+                    surface.gc,
+                    surface.back,
+                    surface.depth,
+                    centre_x,
+                    host_baseline + line * 2,
+                    &away,
+                    pal.border.max(pal.focus),
+                    pal.background,
                 )?;
             }
         }
@@ -136,19 +158,38 @@ fn draw(
             let x = left((width / 10).max(24));
             let start = top((height / 3).max(i32::from(big_line) * 2));
             text.draw_left(
-                &surface.c, surface.gc, surface.back, surface.depth,
-                x, start, &format!("{hostname}:~$ idle"), pal.muted, pal.background,
+                &surface.c,
+                surface.gc,
+                surface.back,
+                surface.depth,
+                x,
+                start,
+                &format!("{hostname}:~$ idle"),
+                pal.muted,
+                pal.background,
             )?;
             big.draw_left(
-                &surface.c, surface.gc, surface.back, surface.depth,
-                x, start + big_line * 2, &core::clock_text(Local::now()),
-                pal.foreground, pal.background,
+                &surface.c,
+                surface.gc,
+                surface.back,
+                surface.depth,
+                x,
+                start + big_line * 2,
+                &core::clock_text(Local::now()),
+                pal.foreground,
+                pal.background,
             )?;
             if show_away {
                 text.draw_left(
-                    &surface.c, surface.gc, surface.back, surface.depth,
-                    x, start + big_line * 2 + line * 2, &away,
-                    pal.border.max(pal.focus), pal.background,
+                    &surface.c,
+                    surface.gc,
+                    surface.back,
+                    surface.depth,
+                    x,
+                    start + big_line * 2 + line * 2,
+                    &away,
+                    pal.border.max(pal.focus),
+                    pal.background,
                 )?;
             }
         }
@@ -156,27 +197,51 @@ fn draw(
             let clock_baseline = (surface.height / 2) as i16 - line;
             if let Some(rune) = rune {
                 rune.draw_centred(
-                    &surface.c, surface.gc, surface.back, surface.depth,
-                    centre_x, clock_baseline - line * 3,
+                    &surface.c,
+                    surface.gc,
+                    surface.back,
+                    surface.depth,
+                    centre_x,
+                    clock_baseline - line * 3,
                     "ᚠ  ᚢ  ᚦ  ᚨ  ᚱ  ᚲ  ᚷ  ᚹ",
-                    pal.border.max(pal.focus), pal.background,
+                    pal.border.max(pal.focus),
+                    pal.background,
                 )?;
             }
             big.draw_centred(
-                &surface.c, surface.gc, surface.back, surface.depth,
-                centre_x, clock_baseline, &core::clock_text(Local::now()),
-                pal.foreground, pal.background,
+                &surface.c,
+                surface.gc,
+                surface.back,
+                surface.depth,
+                centre_x,
+                clock_baseline,
+                &core::clock_text(Local::now()),
+                pal.foreground,
+                pal.background,
             )?;
             let host_baseline = clock_baseline + big_line;
             text.draw_centred(
-                &surface.c, surface.gc, surface.back, surface.depth,
-                centre_x, host_baseline, hostname, pal.muted, pal.background,
+                &surface.c,
+                surface.gc,
+                surface.back,
+                surface.depth,
+                centre_x,
+                host_baseline,
+                hostname,
+                pal.muted,
+                pal.background,
             )?;
             if show_away {
                 text.draw_centred(
-                    &surface.c, surface.gc, surface.back, surface.depth,
-                    centre_x, host_baseline + line * 2, &away,
-                    pal.border.max(pal.focus), pal.background,
+                    &surface.c,
+                    surface.gc,
+                    surface.back,
+                    surface.depth,
+                    centre_x,
+                    host_baseline + line * 2,
+                    &away,
+                    pal.border.max(pal.focus),
+                    pal.background,
                 )?;
             }
         }
@@ -187,21 +252,86 @@ fn draw(
             let top_y = top(margin + i32::from(big_line));
             let bottom_y = top(height - margin - i32::from(line));
             big.draw_left(
-                &surface.c, surface.gc, surface.back, surface.depth,
-                left_x, top_y, &core::clock_text(Local::now()),
-                pal.foreground, pal.background,
+                &surface.c,
+                surface.gc,
+                surface.back,
+                surface.depth,
+                left_x,
+                top_y,
+                &core::clock_text(Local::now()),
+                pal.foreground,
+                pal.background,
             )?;
             text.draw_left(
-                &surface.c, surface.gc, surface.back, surface.depth,
-                left_x, bottom_y.saturating_sub(line * 2), hostname,
-                pal.muted, pal.background,
+                &surface.c,
+                surface.gc,
+                surface.back,
+                surface.depth,
+                left_x,
+                bottom_y.saturating_sub(line * 2),
+                hostname,
+                pal.muted,
+                pal.background,
             )?;
             if show_away {
                 let away_width = text.width(&away);
                 text.draw_left(
-                    &surface.c, surface.gc, surface.back, surface.depth,
-                    right_x.saturating_sub(away_width), bottom_y, &away,
-                    pal.border.max(pal.focus), pal.background,
+                    &surface.c,
+                    surface.gc,
+                    surface.back,
+                    surface.depth,
+                    right_x.saturating_sub(away_width),
+                    bottom_y,
+                    &away,
+                    pal.border.max(pal.focus),
+                    pal.background,
+                )?;
+            }
+        }
+        config::Layout::Cava => {
+            let spec_w = ((width as f32 * 0.58) as i32).clamp(320, 1100) as u16;
+            let spec_h = ((height as f32 * 0.17) as i32).clamp(96, 210) as u16;
+            let spec_x = left((width - i32::from(spec_w)) / 2);
+            let spec_y = top((height - i32::from(spec_h)) / 2);
+            let clock_baseline = spec_y.saturating_sub(line * 2);
+            big.draw_centred(
+                &surface.c,
+                surface.gc,
+                surface.back,
+                surface.depth,
+                centre_x,
+                clock_baseline,
+                &core::clock_text(Local::now()),
+                pal.foreground,
+                pal.background,
+            )?;
+            text.draw_centred(
+                &surface.c,
+                surface.gc,
+                surface.back,
+                surface.depth,
+                centre_x,
+                spec_y.saturating_sub(line / 2),
+                hostname,
+                pal.muted,
+                pal.background,
+            )?;
+            if let Some(values) = spectrum {
+                cava::paint(surface, pal, spec_x, spec_y, spec_w, spec_h, values)?;
+            }
+            if show_away {
+                text.draw_centred(
+                    &surface.c,
+                    surface.gc,
+                    surface.back,
+                    surface.depth,
+                    centre_x,
+                    spec_y
+                        .saturating_add(spec_h as i16)
+                        .saturating_add(line * 2),
+                    &away,
+                    pal.border.max(pal.focus),
+                    pal.background,
                 )?;
             }
         }
@@ -223,9 +353,20 @@ pub fn run(cfg: config::Config) -> Result<()> {
     let mut text = core::TextRenderer::new(&font, cfg.font_size, &setup)?;
     let mut big = text.at_size(cfg.clock_size);
     let mut rune = core::find_rune_font(cfg.rune_font_path.as_deref())
-        .map(|font| core::TextRenderer::new(&font, (cfg.font_size * 2.2).min(cfg.clock_size * 0.6), &setup))
+        .map(|font| {
+            core::TextRenderer::new(
+                &font,
+                (cfg.font_size * 2.2).min(cfg.clock_size * 0.6),
+                &setup,
+            )
+        })
         .transpose()?;
     let hostname = core::hostname();
+    let mut cava = if cfg.layout == config::Layout::Cava && cfg.visualizer {
+        Some(cava::Cava::new())
+    } else {
+        None
+    };
     let started = Instant::now();
     let mut repaint_at = Instant::now();
     loop {
@@ -259,12 +400,26 @@ pub fn run(cfg: config::Config) -> Result<()> {
         if Instant::now() >= repaint_at {
             let idle =
                 idle_via_extension(&surface.c, root).unwrap_or_else(|| started.elapsed().as_secs());
-            draw(&mut surface, &cfg, &mut text, &mut big, rune.as_mut(), &hostname, idle)?;
-            let ms = next_redraw_ms(
-                Local::now().timestamp_millis(),
+            let spectrum = cava.as_mut().map(|cava| cava.values().to_vec());
+            draw(
+                &mut surface,
+                &cfg,
+                &mut text,
+                &mut big,
+                rune.as_mut(),
+                &hostname,
                 idle,
-                cfg.show_away_after_seconds,
-            );
+                spectrum.as_deref(),
+            )?;
+            let ms = if cava.as_ref().is_some_and(cava::Cava::running) {
+                33
+            } else {
+                next_redraw_ms(
+                    Local::now().timestamp_millis(),
+                    idle,
+                    cfg.show_away_after_seconds,
+                )
+            };
             repaint_at = Instant::now() + Duration::from_millis(ms);
         }
         surface.c.flush()?;

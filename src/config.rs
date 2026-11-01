@@ -15,6 +15,7 @@ pub enum Layout {
     Terminal,
     Runic,
     Corner,
+    Cava,
 }
 
 impl Layout {
@@ -24,6 +25,7 @@ impl Layout {
             "terminal" => Some(Self::Terminal),
             "runic" => Some(Self::Runic),
             "corner" => Some(Self::Corner),
+            "cava" => Some(Self::Cava),
             _ => None,
         }
     }
@@ -34,6 +36,7 @@ impl Layout {
             Self::Terminal => "terminal",
             Self::Runic => "runic",
             Self::Corner => "corner",
+            Self::Cava => "cava",
         }
     }
 }
@@ -44,6 +47,8 @@ pub struct Config {
     pub rune_font_path: Option<String>,
     pub font_size: f32,
     pub layout: Layout,
+    /// Draw the CAVA spectrum in the `cava` layout.
+    pub visualizer: bool,
     pub clock_size: f32,
     /// Start the screensaver after this many minutes of idle time.
     pub idle_minutes: u32,
@@ -231,7 +236,8 @@ impl Default for Config {
             font_path: None,
             rune_font_path: None,
             font_size: 22.0,
-            layout: Layout::Minimal,
+            layout: Layout::Cava,
+            visualizer: true,
             clock_size: 88.0,
             idle_minutes: 15,
             lock_after_minutes: 15,
@@ -287,8 +293,12 @@ impl Config {
             cfg.font_size = n as f32;
         }
         if let Some(layout) = v.get("layout").and_then(|x| x.as_str()) {
-            cfg.layout = Layout::parse(layout)
-                .ok_or_else(|| "layout must be minimal, terminal, runic or corner".to_string())?;
+            cfg.layout = Layout::parse(layout).ok_or_else(|| {
+                "layout must be minimal, terminal, runic, corner or cava".to_string()
+            })?;
+        }
+        if let Some(enabled) = v.get("visualizer").and_then(|x| x.as_bool()) {
+            cfg.visualizer = enabled;
         }
         if let Some(t) = v.get("rune_font_path").and_then(|x| x.as_str()) {
             cfg.rune_font_path = Some(t.to_string());
@@ -358,7 +368,7 @@ impl Config {
 
     pub fn describe(&self) -> String {
         format!(
-            "config: {}\nidle after: {} min\nlock {} min later\ndisplay off: {} min after locking\nlegacy lock_timeout_minutes: {} (ignored)\naway text after: {} s\nclock size: {}\nfont: {}\nlayout: {}\nrune font: {}",
+            "config: {}\nidle after: {} min\nlock {} min later\ndisplay off: {} min after locking\nlegacy lock_timeout_minutes: {} (ignored)\naway text after: {} s\nclock size: {}\nfont: {}\nlayout: {}\nvisualizer: {}\nrune font: {}",
             config_file().display(),
             self.idle_minutes,
             self.lock_after_minutes,
@@ -372,6 +382,7 @@ impl Config {
             self.clock_size,
             self.font_path.as_deref().unwrap_or("auto"),
             self.layout.as_str(),
+            if self.visualizer { "on" } else { "off" },
             self.rune_font_path.as_deref().unwrap_or("auto"),
         )
     }
@@ -384,6 +395,8 @@ mod tests {
     #[test]
     fn defaults_match_the_request() {
         let c = Config::default();
+        assert_eq!(c.layout, Layout::Cava);
+        assert!(c.visualizer);
         assert_eq!(c.idle_minutes, 15);
         assert_eq!(c.lock_after_minutes, 15);
         assert_eq!(c.dpms_off_minutes, 15);
@@ -393,8 +406,17 @@ mod tests {
     fn partial_file_keeps_defaults() {
         let v: toml::Value = "idle_minutes = 5".parse().unwrap();
         let c = Config::from_value(&v).unwrap();
+        assert_eq!(c.layout, Layout::Cava);
+        assert!(c.visualizer);
         assert_eq!(c.idle_minutes, 5);
         assert_eq!(c.dpms_off_minutes, 15);
+    }
+
+    #[test]
+    fn visualizer_can_be_turned_off() {
+        let v: toml::Value = "visualizer = false".parse().unwrap();
+        let c = Config::from_value(&v).unwrap();
+        assert!(!c.visualizer);
     }
 
     #[test]
@@ -403,6 +425,7 @@ mod tests {
         assert_eq!(Layout::parse("TERMINAL"), Some(Layout::Terminal));
         assert_eq!(Layout::parse("runic"), Some(Layout::Runic));
         assert_eq!(Layout::parse("corner"), Some(Layout::Corner));
+        assert_eq!(Layout::parse("CAVA"), Some(Layout::Cava));
         assert!(Layout::parse("noir-ish").is_none());
     }
 
