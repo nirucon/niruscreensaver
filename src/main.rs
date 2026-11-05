@@ -367,7 +367,9 @@ fn draw_cava_frame(
 
 /// Run the screensaver until a key or button dismisses it.
 ///
-/// Wait for X input or the next visible clock/away deadline, not a polling tick.
+/// Wait for X input, the CAVA silence wake-up or the next visible clock/away
+/// deadline, never a polling tick. The spectrum is repainted at 30 fps only
+/// while the display is on and there is sound (see `cava::PowerGate`).
 pub fn run(cfg: config::Config) -> Result<()> {
     let mut surface = core::Surface::new("NIRUSCREENSAVER")?;
     let font = core::find_font(cfg.font_path.as_deref());
@@ -392,13 +394,37 @@ pub fn run(cfg: config::Config) -> Result<()> {
     } else {
         None
     };
+    // The display power is only needed to pause the spectrum.
+    let mut power = cava.as_ref().map(|_| cava::DisplayPower::new(&surface.c));
+    let trace = std::env::var_os("NIRUSCREENSAVER_TRACE").is_some();
+    if let (Some(power), Some(cava)) = (power.as_ref(), cava.as_mut()) {
+        if trace {
+            eprintln!("niruscreensaver: display power: {}", power.mode());
+        }
+        cava.set_display(power.on());
+    }
     let started = Instant::now();
-    let mut repaint_at = Instant::now();
     let mut next_full = Instant::now();
+    let mut next_frame = Instant::now();
+    let mut pending: Option<Event> = None;
     loop {
         let root = surface.c.setup().roots[surface.screen_num].root;
+        let mut display_change = None;
         // Drain x11rb's buffered events before blocking on its socket.
-        while let Some(event) = surface.c.poll_for_event()? {
+        while let Some(event) = match pending.take() {
+            Some(event) => Some(event),
+            None => surface.c.poll_for_event()?,
+        } {
+            if let Some(power) = power.as_mut() {
+                let changed = match &event {
+                    // Input is what wakes a display; check it at once.
+                    Event::KeyPress(_) | Event::ButtonPress(_) | Event::MotionNotify(_) => {
+                        power.input(&surface.c, Instant::now())
+                    }
+                    event => power.event(event),
+                };
+                display_change = changed.or(display_change);
+            }
             match event {
                 // Any key or click dismisses it. The grabs are released so the
                 // session can be used normally afterwards.
@@ -406,10 +432,7 @@ pub fn run(cfg: config::Config) -> Result<()> {
                     surface.release_input()?;
                     return Ok(());
                 }
-                Event::Expose(_) => {
-                    repaint_at = Instant::now();
-                    next_full = Instant::now();
-                }
+                Event::Expose(_) => next_full = Instant::now(),
                 // A resolution change or monitor hotplug changes the root
                 // geometry; the saver must not leave uncovered pixels.
                 // ConfigureNotify can also be a child window; resize()
@@ -419,59 +442,92 @@ pub fn run(cfg: config::Config) -> Result<()> {
                 | Event::ConfigureNotify(_)
                     if surface.resize()? =>
                 {
-                    repaint_at = Instant::now();
                     next_full = Instant::now();
                 }
                 _ => {}
             }
         }
-        let now = Instant::now();
-        if now >= repaint_at {
-            let cava_active = cava.as_ref().is_some_and(cava::Cava::running);
-            if cava_active && now < next_full {
-                // The 30 fps spectrum path makes no X round trip: the idle
-                // time is only needed for the away text of a full frame.
-                draw_cava_frame(&surface, &cfg, &mut cava)?;
-                repaint_at = now + Duration::from_millis(33);
-            } else {
-                let idle = idle_via_extension(&surface.c, root)
-                    .unwrap_or_else(|| started.elapsed().as_secs());
-                let spectrum = cava.as_mut().map(|cava| cava.values().to_vec());
-                draw(
-                    &mut surface,
-                    &cfg,
-                    &mut text,
-                    &mut big,
-                    rune.as_mut(),
-                    &hostname,
-                    idle,
-                    spectrum.as_deref(),
-                )?;
-                let ms = next_redraw_ms(
-                    Local::now().timestamp_millis(),
-                    idle,
-                    cfg.show_away_after_seconds,
-                );
-                next_full = now + Duration::from_millis(ms);
-                repaint_at = now
-                    + if cava_active {
-                        Duration::from_millis(33)
-                    } else {
-                        Duration::from_millis(ms)
-                    };
+        if let Some(on) = power
+            .as_mut()
+            .and_then(|power| power.poll(&surface.c, Instant::now()))
+        {
+            display_change = Some(on);
+        }
+        if let Some(on) = display_change {
+            if trace {
+                eprintln!("niruscreensaver: display {}", if on { "on" } else { "off" });
             }
+            // Off stops and reaps CAVA; one static frame stays. On restarts it.
+            if let Some(cava) = cava.as_mut() {
+                cava.set_display(on);
+            }
+            next_full = Instant::now();
+        }
+        let now = Instant::now();
+        if now >= next_full {
+            let idle =
+                idle_via_extension(&surface.c, root).unwrap_or_else(|| started.elapsed().as_secs());
+            let spectrum = cava.as_mut().map(|cava| cava.values().to_vec());
+            draw(
+                &mut surface,
+                &cfg,
+                &mut text,
+                &mut big,
+                rune.as_mut(),
+                &hostname,
+                idle,
+                spectrum.as_deref(),
+            )?;
+            let ms = next_redraw_ms(
+                Local::now().timestamp_millis(),
+                idle,
+                cfg.show_away_after_seconds,
+            );
+            next_full = now + Duration::from_millis(ms);
+            next_frame = now + FRAME;
+        } else if now >= next_frame && cava.as_ref().is_some_and(cava::Cava::animating) {
+            // The 30 fps spectrum path makes no X round trip: the idle time is
+            // only needed for the away text of a full frame. The frame that
+            // detects two seconds of silence is drawn flat and is the last.
+            draw_cava_frame(&surface, &cfg, &mut cava)?;
+            next_frame = now + FRAME;
         }
         surface.c.flush()?;
-        let timeout = repaint_at
+        // Round trips above may have queued events in x11rb, away from the fd.
+        pending = surface.c.poll_for_event()?;
+        if pending.is_some() {
+            continue;
+        }
+        let mut deadline = next_full;
+        if cava.as_ref().is_some_and(cava::Cava::animating) {
+            deadline = deadline.min(next_frame);
+        }
+        if let Some(poll) = power.as_ref().and_then(cava::DisplayPower::deadline) {
+            deadline = deadline.min(poll);
+        }
+        let timeout = deadline
             .saturating_duration_since(Instant::now())
             .as_millis()
             .min(60_000) as i32;
-        wait_readable(
-            std::os::fd::AsRawFd::as_raw_fd(surface.c.stream()),
+        let cava_wake = cava.as_ref().and_then(cava::Cava::wake_fd);
+        let ready = wait_readable(
+            [
+                Some(std::os::fd::AsRawFd::as_raw_fd(surface.c.stream())),
+                cava_wake,
+            ],
             timeout.max(1),
         );
+        if ready[1] {
+            if let Some(cava) = cava.as_mut() {
+                cava.woke();
+            }
+            next_frame = Instant::now();
+        }
     }
 }
+
+/// One spectrum frame, the same 30 fps as CAVA produces.
+const FRAME: Duration = Duration::from_millis(33);
 
 fn next_redraw_ms(wall_ms: i64, idle: u64, show_after: u32) -> u64 {
     let clock = (60_000 - wall_ms.rem_euclid(60_000)) as u64;
@@ -483,24 +539,20 @@ fn next_redraw_ms(wall_ms: i64, idle: u64, show_after: u32) -> u64 {
     clock.min(away).max(1)
 }
 
-/// Block until the X socket is readable or the timeout expires.
-fn wait_readable(fd: std::os::fd::RawFd, timeout_ms: i32) -> bool {
-    #[repr(C)]
-    struct PollFd {
-        fd: std::os::fd::RawFd,
-        events: i16,
-        revents: i16,
-    }
-    extern "C" {
-        fn poll(fds: *mut PollFd, nfds: u64, timeout: i32) -> i32;
-    }
-    let mut pfd = PollFd {
-        fd,
-        events: 1, // POLLIN
+/// Wait on X and the CAVA silence wake-up without periodic polling. Returns
+/// which descriptors became readable.
+fn wait_readable(fds: [Option<std::os::fd::RawFd>; 2], timeout_ms: i32) -> [bool; 2] {
+    let mut poll = fds.map(|fd| libc::pollfd {
+        fd: fd.unwrap_or(-1),
+        events: libc::POLLIN,
         revents: 0,
-    };
-    // SAFETY: a single valid pollfd for the duration of the call.
-    unsafe { poll(&mut pfd, 1, timeout_ms) > 0 }
+    });
+    // SAFETY: two valid pollfd values; poll ignores a negative unused fd.
+    let n = unsafe { libc::poll(poll.as_mut_ptr(), poll.len() as libc::nfds_t, timeout_ms) };
+    if n <= 0 {
+        return [false; 2];
+    }
+    poll.map(|p| p.fd >= 0 && p.revents & libc::POLLIN != 0)
 }
 
 fn main() {

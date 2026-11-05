@@ -216,6 +216,7 @@ dependencies = [
  "ab_glyph",
  "chrono",
  "indexmap",
+ "libc",
  "serde",
  "toml",
  "x11rb",
