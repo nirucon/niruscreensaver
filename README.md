@@ -84,7 +84,9 @@ The spectrum only runs while it can be seen and has something to show:
 - **Silence**: after 2 s with every bar below the noise floor the 30 fps
   repaint stops after one flat frame, `playerctl` is stopped, and the first
   non-silent sample resumes it. CAVA's own `sleep_timer` pauses its output
-  during the same silence.
+  during the same silence. When sound returns the bars rise from the flat
+  frame with the normal attack instead of jumping to the first sample, and
+  quiet sounds just above the noise floor grow from zero.
 - With nothing to animate the saver wakes only for the minute clock and the
   away text. CAVA runs with a fixed sensitivity and the levels are normalized
   in the saver, so the noise of an idle audio stream never looks like sound.
@@ -116,5 +118,9 @@ sh tests/twin-drift.sh                                      # needs network
 
 `NIRUSCREENSAVER_TRACE=1` logs how the display power is followed and its
 changes.
+
+`NIRU_CAVA_TRACE=/path/to/file` appends one line per spectrum frame (the
+milliseconds since start, `L`ive, `S`ilent or display `O`ff, and the 48 bar
+heights) for measuring motion and frame pacing; it records nothing else.
 
 MIT. Copyright 2026 Nicklas Rudolfsson.
