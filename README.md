@@ -65,7 +65,76 @@ and CopyArea exposures are disabled. Bars are drawn from the active NIRUX
 theme's focus colour, with a lighter peak, so the spectrum follows every suite
 theme. Set `visualizer = false` to keep the cava composition without the
 spectrum. If CAVA is not installed, the clock and hostname are still shown;
-install `cava` to enable the bars.
+install `cava` to enable the bars. With the default `visual = "auto"` CAVA
+only runs while music plays; see below.
+
+### Music or quotes (`visual`)
+
+`visual` decides what the `cava` layout shows where the spectrum is drawn:
+
+- `auto` (the default): the CAVA spectrum only while music or radio plays, and
+  otherwise one quote from the quotes file below.
+- `cava`: the spectrum alone, exactly as before 0.19 (CAVA runs whenever the
+  display is on).
+- `quotes`: quotes alone; CAVA never starts.
+- `none`: neither; the panel stays empty. `visualizer = false` without a
+  `visual` setting means `none`, as before.
+
+With `auto`, a small PulseAudio client (PipeWire serves the same API through
+`pipewire-pulse`; libpulse is loaded at run time, so it is not a build or run
+dependency) watches the playback streams through subscription events. Only
+while a stream is playing (not corked) does it open a peak monitor on the
+default sink's monitor, at ten peaks a second delivered five times a second;
+with no stream nothing is polled at all. CAVA is started when the peak has
+stayed above about -54 dBFS for 300 ms, so an always-present but silent stream
+(an idle MIDI synthesizer) never starts it, and it is stopped and reaped, not
+just paused, after 5 s of silence. The change fades the quote out and the
+spectrum in; the bars still rise from flat with the usual attack. Without a
+sound server the panel shows quotes and the client retries in the background
+(every 2 s, backing off to once a minute). With the display off nothing runs:
+no CAVA, no peak monitor, no quote changes. `reduced_motion = true` changes
+quotes and the spectrum without fades.
+
+A quote changes to another, chosen at random, every minute with a soft fade;
+between changes nothing is redrawn. It is drawn in the NIRUX theme font and
+colours, centred where the spectrum would be, wrapped to about 64 characters,
+with a smaller size (down to half, at least 11 px) when it is long and an
+ellipsis when it still does not fit. Attributions are muted.
+
+### The quotes file
+
+`${XDG_CONFIG_HOME:-~/.config}/niru/quotes.txt` is shared with NIRULOCK.
+When it is missing, either program writes the default file (atomically, mode
+0644); it never overwrites an existing file, so it is yours to edit. An empty
+or unreadable file shows no quote and no error.
+
+```text
+# Lines starting with # are comments.
+Quotes are separated by one or more blank lines.
+A quote may span several lines;
+its line breaks are kept.
+— A line starting with "— " (em dash, space) or "-- " is the attribution
+
+Fä dör,
+fränder dö,
+...
+— Hávamál 76 (övers. Erik Brate, 1913)
+```
+
+To add a quote, write it anywhere in the file with a blank line before and
+after it; to remove one, delete its lines (or put `#` in front of them). The
+file's own header explains this in Swedish, with an example. Changes are
+picked up the next time the screensaver or lock starts, and while one is
+showing, at the next quote change (the file is read again when its
+modification time changed). The file is read on its own thread, never on the
+input or drawing path.
+
+The default quotes are 22 stanzas of Hávamál ("Den höges sång") in Erik
+Brate's Swedish translation, *Eddan. De nordiska guda- och hjältesångerna*
+(1913), which is in the public domain (Brate died in 1924). The text is taken
+verbatim from Project Runeberg, <https://runeberg.org/eddan/se-02.html>; the
+stanza numbers follow that edition. The source of the default file is
+[`src/quotes.txt`](src/quotes.txt).
 
 While audio plays, `show_media = true` (the default) shows the playing MPRIS
 track as "Artist – Title" under the spectrum. It needs `playerctl`, which is
@@ -93,8 +162,10 @@ The spectrum only runs while it can be seen and has something to show:
   CAVA dies with the saver (`PDEATHSIG`), and its temporary config is removed
   after the first frame.
 
-The CAVA code is shared verbatim with NIRULOCK (`src/cava.rs`, checked against
-the tag in `tests/nirulock-tag` by `tests/twin-drift.sh`).
+The CAVA, audio detector, panel and quotes code is shared verbatim with
+NIRULOCK (`src/cava.rs`, `src/audio.rs`, `src/visual.rs`, `src/quotes.rs`,
+`src/quotes.txt` and `src/palette.rs`, checked against the tag in
+`tests/nirulock-tag` by `tests/twin-drift.sh`).
 
 Layout only changes composition; the NIRUX theme still owns colours. The screen
 stays opaque black. A missing runic font omits the ornament, never draws empty

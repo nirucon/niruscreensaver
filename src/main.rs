@@ -11,11 +11,14 @@
 //! niruscreensaver --config      print the effective configuration
 //! ```
 
+mod audio;
 mod cava;
 mod config;
 mod core;
 mod media;
 mod palette;
+mod quotes;
+mod visual;
 
 /// One error type for the whole program, so `?` works with X11, IO and
 /// configuration errors alike.
@@ -102,7 +105,7 @@ fn draw(
     rune: Option<&mut core::TextRenderer>,
     hostname: &str,
     idle: u64,
-    spectrum: Option<&[f32]>,
+    visual: Option<&mut visual::Visual>,
     media: Option<&str>,
 ) -> Result<()> {
     let pal = &cfg.palette;
@@ -315,8 +318,8 @@ fn draw(
                 pal.muted,
                 pal.background,
             )?;
-            if let Some(values) = spectrum {
-                cava::paint(surface, pal, spec_x, spec_y, spec_w, spec_h, values)?;
+            if let Some(visual) = visual {
+                visual.paint(surface, pal, (spec_x, spec_y, spec_w, spec_h))?;
             }
             if let Some(media) = media {
                 let media = fit(text, media, i32::from(spec_w));
@@ -379,29 +382,30 @@ fn cava_rect(surface: &core::Surface) -> (i16, i16, u16, u16) {
     (spec_x, spec_y, spec_w, spec_h)
 }
 
+/// Repaint only the CAVA panel (spectrum or quote) between full frames.
 fn draw_cava_frame(
     surface: &core::Surface,
     cfg: &config::Config,
-    cava: &mut Option<cava::Cava>,
+    visual: &mut Option<visual::Visual>,
 ) -> Result<()> {
     if cfg.layout != config::Layout::Cava {
         return Ok(());
     }
-    let Some(cava) = cava.as_mut() else {
+    let Some(visual) = visual.as_mut() else {
         return Ok(());
     };
     let (x, y, width, height) = cava_rect(surface);
-    let values = cava.values().to_vec();
-    cava::paint(surface, &cfg.palette, x, y, width, height, &values)?;
+    visual.paint(surface, &cfg.palette, (x, y, width, height))?;
     surface.present_rect(x, y, width, height)?;
     Ok(())
 }
 
 /// Run the screensaver until a key or button dismisses it.
 ///
-/// Wait for X input, the CAVA silence wake-up or the next visible clock/away
-/// deadline, never a polling tick. The spectrum is repainted at 30 fps only
-/// while the display is on and there is sound (see `cava::PowerGate`).
+/// Wait for X input, the CAVA silence wake-up, the panel's detector/loader
+/// wake-up or the next visible clock/away/quote deadline, never a polling
+/// tick. The panel is repainted at 30 fps only while the display is on and
+/// the spectrum has sound (see `cava::PowerGate`) or a fade runs.
 pub fn run(cfg: config::Config) -> Result<()> {
     let mut surface = core::Surface::new("NIRUSCREENSAVER")?;
     let font = core::find_font(cfg.font_path.as_deref());
@@ -421,19 +425,25 @@ pub fn run(cfg: config::Config) -> Result<()> {
         })
         .transpose()?;
     let hostname = core::hostname();
-    let mut cava = if cfg.layout == config::Layout::Cava && cfg.visualizer {
-        Some(cava::Cava::new())
-    } else {
-        None
-    };
-    // The display power is only needed to pause the spectrum.
-    let mut power = cava.as_ref().map(|_| cava::DisplayPower::new(&surface.c));
+    // The quotes file and the audio detector are read on their own threads.
+    let mut visual =
+        (cfg.layout == config::Layout::Cava && cfg.visual != visual::Mode::None).then(|| {
+            visual::Visual::new(
+                cfg.visual,
+                !cfg.reduced_motion,
+                &text,
+                cfg.font_size,
+                "niruscreensaver",
+            )
+        });
+    // The display power is only needed to pause the panel.
+    let mut power = visual.as_ref().map(|_| cava::DisplayPower::new(&surface.c));
     let trace = std::env::var_os("NIRUSCREENSAVER_TRACE").is_some();
-    if let (Some(power), Some(cava)) = (power.as_ref(), cava.as_mut()) {
+    if let (Some(power), Some(visual)) = (power.as_ref(), visual.as_mut()) {
         if trace {
             eprintln!("niruscreensaver: display power: {}", power.mode());
         }
-        cava.set_display(power.on());
+        visual.set_display(power.on());
     }
     // Where the pointer was when the saver appeared, for dismiss_on_motion.
     let origin = cfg
@@ -445,7 +455,7 @@ pub fn run(cfg: config::Config) -> Result<()> {
         .flatten()
         .map(|p| (p.root_x, p.root_y));
     // The playing track under the spectrum, followed only while it is live.
-    let mut media = (cava.is_some() && cfg.show_media).then(media::Media::new);
+    let mut media = (visual.is_some() && cfg.show_media).then(media::Media::new);
     let started = Instant::now();
     // The first frame fades in from black unless reduced motion is asked for.
     let mut fade = (!cfg.reduced_motion).then(Instant::now);
@@ -511,17 +521,24 @@ pub fn run(cfg: config::Config) -> Result<()> {
             if trace {
                 eprintln!("niruscreensaver: display {}", if on { "on" } else { "off" });
             }
-            // Off stops and reaps CAVA; one static frame stays. On restarts it.
-            if let Some(cava) = cava.as_mut() {
-                cava.set_display(on);
+            // Off stops and reaps CAVA and pauses the detector; one static
+            // frame stays. On restarts them.
+            if let Some(visual) = visual.as_mut() {
+                visual.set_display(on);
             }
             next_full = Instant::now();
         }
         let now = Instant::now();
+        // The panel follows the audio detector, the quotes loader and its own
+        // fade and rotation timers; this reads atomics only.
+        let mut panel_dirty = false;
+        if let Some(visual) = visual.as_mut() {
+            visual.tick(now);
+            panel_dirty = visual.take_repaint();
+        }
         if now >= next_full {
             let idle =
                 idle_via_extension(&surface.c, root).unwrap_or_else(|| started.elapsed().as_secs());
-            let spectrum = cava.as_mut().map(|cava| cava.values().to_vec());
             let track = media.as_ref().and_then(media::Media::line);
             let level = fade.map_or(1.0, |start| {
                 fade_level(now.saturating_duration_since(start))
@@ -538,7 +555,7 @@ pub fn run(cfg: config::Config) -> Result<()> {
                 rune.as_mut(),
                 &hostname,
                 idle,
-                spectrum.as_deref(),
+                visual.as_mut(),
                 track.as_deref(),
             )?;
             let ms = next_redraw_ms(
@@ -552,18 +569,23 @@ pub fn run(cfg: config::Config) -> Result<()> {
             }
             next_frame = now + FRAME;
         } else if fade.is_none()
-            && now >= next_frame
-            && cava.as_ref().is_some_and(cava::Cava::animating)
+            && ((now >= next_frame && visual.as_ref().is_some_and(visual::Visual::animating))
+                || panel_dirty)
         {
-            // The 30 fps spectrum path makes no X round trip: the idle time is
+            // The 30 fps panel path makes no X round trip: the idle time is
             // only needed for the away text of a full frame. The frame that
             // detects two seconds of silence is drawn flat and is the last.
-            draw_cava_frame(&surface, &cfg, &mut cava)?;
-            next_frame = now + FRAME;
+            draw_cava_frame(&surface, &cfg, &mut visual)?;
+            // A steady cadence, as in NIRULOCK: the time spent drawing is not
+            // added to the interval, and a late frame restarts it.
+            next_frame += FRAME;
+            if next_frame <= Instant::now() {
+                next_frame = Instant::now() + FRAME;
+            }
         }
         if let Some(media) = media.as_mut() {
             // Starts or stops playerctl only when the spectrum starts or stops.
-            media.set_active(cava.as_ref().is_some_and(cava::Cava::animating));
+            media.set_active(visual.as_ref().is_some_and(visual::Visual::cava_live));
             if media.take_changed() {
                 next_full = Instant::now();
             }
@@ -575,27 +597,36 @@ pub fn run(cfg: config::Config) -> Result<()> {
             continue;
         }
         let mut deadline = next_full;
-        if cava.as_ref().is_some_and(cava::Cava::animating) {
+        if visual.as_ref().is_some_and(visual::Visual::animating) {
             deadline = deadline.min(next_frame);
         }
-        if let Some(poll) = power.as_ref().and_then(cava::DisplayPower::deadline) {
-            deadline = deadline.min(poll);
+        for due in [
+            power.as_ref().and_then(cava::DisplayPower::deadline),
+            visual.as_ref().and_then(visual::Visual::deadline),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            deadline = deadline.min(due);
         }
         let timeout = deadline
             .saturating_duration_since(Instant::now())
             .as_millis()
             .min(60_000) as i32;
-        let cava_wake = cava.as_ref().and_then(cava::Cava::wake_fd);
+        let [cava_wake, visual_wake] = visual
+            .as_ref()
+            .map_or([None, None], visual::Visual::wake_fds);
         let ready = wait_readable(
             [
                 Some(std::os::fd::AsRawFd::as_raw_fd(surface.c.stream())),
                 cava_wake,
+                visual_wake,
             ],
             timeout.max(1),
         );
-        if ready[1] {
-            if let Some(cava) = cava.as_mut() {
-                cava.woke();
+        if ready[1] || ready[2] {
+            if let Some(visual) = visual.as_mut() {
+                visual.woke([ready[1], ready[2]]);
             }
             next_frame = Instant::now();
         }
@@ -662,6 +693,7 @@ fn wait_for_release(surface: &core::Surface) -> Result<()> {
             [
                 Some(std::os::fd::AsRawFd::as_raw_fd(surface.c.stream())),
                 None,
+                None,
             ],
             (left.as_millis() as i32).max(1),
         );
@@ -681,7 +713,7 @@ fn input_held(surface: &core::Surface) -> Result<bool> {
 }
 
 /// One spectrum frame, the same 30 fps as CAVA produces.
-const FRAME: Duration = Duration::from_millis(33);
+const FRAME: Duration = Duration::from_micros(33_333);
 
 /// True once the pointer is more than `MOTION_DISMISS_PX` from `origin`.
 fn moved_far(origin: (i16, i16), now: (i16, i16)) -> bool {
@@ -701,18 +733,19 @@ fn next_redraw_ms(wall_ms: i64, idle: u64, show_after: u32) -> u64 {
     clock.min(away).max(1)
 }
 
-/// Wait on X and the CAVA silence wake-up without periodic polling. Returns
-/// which descriptors became readable.
-fn wait_readable(fds: [Option<std::os::fd::RawFd>; 2], timeout_ms: i32) -> [bool; 2] {
+/// Wait on X, the CAVA silence wake-up and the panel's detector/loader
+/// wake-up without periodic polling. Returns which descriptors became
+/// readable.
+fn wait_readable(fds: [Option<std::os::fd::RawFd>; 3], timeout_ms: i32) -> [bool; 3] {
     let mut poll = fds.map(|fd| libc::pollfd {
         fd: fd.unwrap_or(-1),
         events: libc::POLLIN,
         revents: 0,
     });
-    // SAFETY: two valid pollfd values; poll ignores a negative unused fd.
+    // SAFETY: three valid pollfd values; poll ignores a negative unused fd.
     let n = unsafe { libc::poll(poll.as_mut_ptr(), poll.len() as libc::nfds_t, timeout_ms) };
     if n <= 0 {
-        return [false; 2];
+        return [false; 3];
     }
     poll.map(|p| p.fd >= 0 && p.revents & libc::POLLIN != 0)
 }

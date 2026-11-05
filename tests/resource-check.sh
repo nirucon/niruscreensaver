@@ -168,6 +168,9 @@ chmod +x "$TEST/bin/cava" "$TEST/bin/playerctl"
 wakeups() { cat /proc/"$SAVER"/task/*/status | awk '/ctxt_switches/{s+=$2} END{print s+0}'; }
 ticks() { awk '{print $14+$15}' /proc/"$SAVER"/stat; }
 children() { pgrep -c -P "$SAVER" -x "$1" || :; }
+# The spectrum alone, as before 0.11: CAVA runs whenever the display is on.
+mkdir -p "$XDG_CONFIG_HOME/niruui"
+printf 'visual = "cava"\n' > "$XDG_CONFIG_HOME/niruui/screensaver.toml"
 TMPDIR=$TEST NIRUSCREENSAVER_TRACE=1 "$BIN" > "$TEST/saver-cava.log" 2>&1 & SAVER=$!
 sleep 1.5
 [ "$(children cava)" -eq 1 ] || { echo "FAIL fixture cava not running"; exit 1; }
@@ -191,6 +194,34 @@ printf 'cava fixture: live=%s/s (%s ticks) silent=%s/3s (%s ticks) resumed=%s/s\
 xdotool key space; wait_gone
 pgrep -f "$TEST/bin/cava" > /dev/null && { echo "FAIL cava outlived the saver"; exit 1; }
 pgrep -f "$TEST/bin/playerctl" > /dev/null && { echo "FAIL playerctl outlived the saver"; exit 1; }
+rm "$XDG_CONFIG_HOME/niruui/screensaver.toml"
+
+# visual = "auto" (the default) without a sound server: quotes, never CAVA,
+# even though the fixture would play, and a static screen between changes.
+touch "$TEST/resume"
+PULSE_SERVER=unix:$TEST/no-server "$BIN" > "$TEST/saver-auto.log" 2>&1 & SAVER=$!
+sleep 3
+kill -0 "$SAVER" || { cat "$TEST/saver-auto.log"; exit 1; }
+quotes=$XDG_CONFIG_HOME/niru/quotes.txt
+[ -f "$quotes" ] || { echo "FAIL the default quotes file was not written"; exit 1; }
+[ "$(stat -c %a "$quotes")" = 644 ] || { echo "FAIL the quotes file is not 0644"; exit 1; }
+[ "$(children cava)" -eq 0 ] || { echo "FAIL CAVA started without music"; exit 1; }
+# The drawing thread must sleep between quote changes. The audio detector's
+# own thread retries the missing sound server with a back-off (2 s, 4 s, ...
+# up to a minute), so it is bounded separately.
+main_wakeups() { awk '/ctxt_switches/{s+=$2} END{print s+0}' /proc/"$SAVER"/task/"$SAVER"/status; }
+w0=$(wakeups); m0=$(main_wakeups); t0=$(ticks); sleep 3
+quiet=$(($(wakeups) - w0)); main=$(($(main_wakeups) - m0)); quiet_ticks=$(($(ticks) - t0))
+printf 'quotes: %s wakeups/3s on the drawing thread, %s in all threads (%s ticks), no CAVA\n' "$main" "$quiet" "$quiet_ticks"
+[ "$main" -le 2 ] || { echo "FAIL the quote view woke between changes"; exit 1; }
+[ "$quiet" -le 30 ] || { echo "FAIL the audio detector retried too often"; exit 1; }
+[ "$quiet_ticks" -le 1 ] || { echo "FAIL CPU used on the quote view"; exit 1; }
+printf 'Mitt eget citat\n' > "$quotes"
+xdotool key space; wait_gone
+PULSE_SERVER=unix:$TEST/no-server "$BIN" > "$TEST/saver-auto.log" 2>&1 & SAVER=$!
+sleep 2
+[ "$(cat "$quotes")" = "Mitt eget citat" ] || { echo "FAIL the quotes file was overwritten"; exit 1; }
+xdotool key space; wait_gone
 rm "$TEST/bin/cava" "$TEST/bin/playerctl"
 
 # A second saver cannot claim success when the first already owns the grabs.

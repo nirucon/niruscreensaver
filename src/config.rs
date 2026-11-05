@@ -52,6 +52,10 @@ pub struct Config {
     pub layout: Layout,
     /// Draw the CAVA spectrum in the `cava` layout.
     pub visualizer: bool,
+    /// What the `cava` layout's panel shows: `auto` (the spectrum while
+    /// music plays, quotes otherwise), `cava`, `quotes` or `none`.
+    /// `visualizer = false` without `visual` means `none`.
+    pub visual: crate::visual::Mode,
     pub clock_size: f32,
     /// Start the screensaver after this many minutes of idle time.
     pub idle_minutes: u32,
@@ -252,6 +256,7 @@ impl Default for Config {
             font_size: 22.0,
             layout: Layout::Cava,
             visualizer: true,
+            visual: crate::visual::Mode::Auto,
             clock_size: 88.0,
             idle_minutes: 15,
             lock_after_minutes: 15,
@@ -316,6 +321,13 @@ impl Config {
         }
         if let Some(enabled) = v.get("visualizer").and_then(|x| x.as_bool()) {
             cfg.visualizer = enabled;
+            if !enabled {
+                cfg.visual = crate::visual::Mode::None;
+            }
+        }
+        if let Some(visual) = v.get("visual").and_then(|x| x.as_str()) {
+            cfg.visual = crate::visual::Mode::parse(visual)
+                .ok_or_else(|| "visual must be auto, cava, quotes or none".to_string())?;
         }
         if let Some(t) = v.get("rune_font_path").and_then(|x| x.as_str()) {
             cfg.rune_font_path = Some(t.to_string());
@@ -394,7 +406,7 @@ impl Config {
 
     pub fn describe(&self) -> String {
         format!(
-            "config: {}\nidle after: {} min\nlock {} min later\ndisplay off: {} min after locking\nlegacy lock_timeout_minutes: {} (ignored)\naway text after: {} s\nclock size: {}\nfont: {}\nlayout: {}\nvisualizer: {}\nrune font: {}\ndismiss on motion: {}\nshow media: {}\nreduced motion: {}",
+            "config: {}\nidle after: {} min\nlock {} min later\ndisplay off: {} min after locking\nlegacy lock_timeout_minutes: {} (ignored)\naway text after: {} s\nclock size: {}\nfont: {}\nlayout: {}\nvisualizer: {}\nvisual: {}\nrune font: {}\ndismiss on motion: {}\nshow media: {}\nreduced motion: {}",
             config_file().display(),
             self.idle_minutes,
             self.lock_after_minutes,
@@ -409,6 +421,7 @@ impl Config {
             self.font_path.as_deref().unwrap_or("auto"),
             self.layout.as_str(),
             if self.visualizer { "on" } else { "off" },
+            self.visual.as_str(),
             self.rune_font_path.as_deref().unwrap_or("auto"),
             if self.dismiss_on_motion { "on" } else { "off" },
             if self.show_media { "on" } else { "off" },
@@ -460,6 +473,22 @@ mod tests {
         assert!(!Config::default().reduced_motion);
         let v: toml::Value = "reduced_motion = true".parse().unwrap();
         assert!(Config::from_value(&v).unwrap().reduced_motion);
+    }
+
+    #[test]
+    fn visual_defaults_to_auto_and_follows_the_old_switch() {
+        use crate::visual::Mode;
+        assert_eq!(Config::default().visual, Mode::Auto);
+        let c = |text: &str| Config::from_value(&text.parse().unwrap());
+        assert_eq!(c("visual = \"cava\"").unwrap().visual, Mode::Cava);
+        assert_eq!(c("visual = \"quotes\"").unwrap().visual, Mode::Quotes);
+        assert_eq!(c("visual = \"none\"").unwrap().visual, Mode::None);
+        assert_eq!(c("visualizer = false").unwrap().visual, Mode::None);
+        assert_eq!(c("visualizer = true").unwrap().visual, Mode::Auto);
+        // An explicit visual wins over the old switch.
+        let both = c("visualizer = false\nvisual = \"quotes\"").unwrap();
+        assert_eq!(both.visual, Mode::Quotes);
+        assert!(c("visual = \"loud\"").is_err());
     }
 
     #[test]
