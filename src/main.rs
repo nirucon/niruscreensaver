@@ -429,6 +429,7 @@ pub fn run(cfg: config::Config) -> Result<()> {
                 // Any key or click dismisses it. The grabs are released so the
                 // session can be used normally afterwards.
                 Event::KeyPress(_) | Event::ButtonPress(_) => {
+                    wait_for_release(&surface)?;
                     surface.release_input()?;
                     return Ok(());
                 }
@@ -524,6 +525,52 @@ pub fn run(cfg: config::Config) -> Result<()> {
             next_frame = Instant::now();
         }
     }
+}
+
+/// Longest wait for the dismissing key or button to come up.
+const RELEASE_WAIT: Duration = Duration::from_secs(1);
+
+/// Keep the grabs until every key and button is up, at most [`RELEASE_WAIT`].
+///
+/// The grab swallows the dismissing KeyPress, but its KeyRelease came after
+/// the ungrab and reached the window under the pointer, a stray event for a
+/// terminal or editor. Everything that arrives meanwhile was meant for the
+/// saver and is discarded. Event-driven: one check per release, no polling.
+fn wait_for_release(surface: &core::Surface) -> Result<()> {
+    let deadline = Instant::now() + RELEASE_WAIT;
+    loop {
+        while surface.c.poll_for_event()?.is_some() {}
+        if !input_held(surface)? {
+            return Ok(());
+        }
+        let left = deadline.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            return Ok(());
+        }
+        surface.c.flush()?;
+        if surface.c.poll_for_event()?.is_some() {
+            continue;
+        }
+        wait_readable(
+            [
+                Some(std::os::fd::AsRawFd::as_raw_fd(surface.c.stream())),
+                None,
+            ],
+            (left.as_millis() as i32).max(1),
+        );
+    }
+}
+
+/// True while any key or pointer button is down.
+fn input_held(surface: &core::Surface) -> Result<bool> {
+    let keys = surface.c.query_keymap()?.reply()?.keys;
+    let pointer = surface.c.query_pointer(surface.win)?.reply()?;
+    let buttons = KeyButMask::BUTTON1
+        | KeyButMask::BUTTON2
+        | KeyButMask::BUTTON3
+        | KeyButMask::BUTTON4
+        | KeyButMask::BUTTON5;
+    Ok(keys.iter().any(|byte| *byte != 0) || u16::from(pointer.mask) & u16::from(buttons) != 0)
 }
 
 /// One spectrum frame, the same 30 fps as CAVA produces.

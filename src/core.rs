@@ -390,7 +390,7 @@ impl Surface {
             .grab_pointer(
                 true,
                 win,
-                EventMask::BUTTON_PRESS | EventMask::POINTER_MOTION,
+                EventMask::BUTTON_PRESS | EventMask::BUTTON_RELEASE | EventMask::POINTER_MOTION,
                 GrabMode::ASYNC,
                 GrabMode::ASYNC,
                 x11rb::NONE,

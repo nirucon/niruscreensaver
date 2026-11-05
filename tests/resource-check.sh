@@ -4,13 +4,24 @@ set -eu
 BIN=${1:?path to niruscreensaver}
 MODE=${2:-check}
 TEST=$(mktemp -d)
-SAVER=; XVFB=
+SAVER=; XVFB=; XEV=
 cleanup() {
   if [ -n "$SAVER" ]; then kill "$SAVER" 2>/dev/null || :; wait "$SAVER" 2>/dev/null || :; fi
+  if [ -n "$XEV" ]; then kill "$XEV" 2>/dev/null || :; fi
   if [ -n "$XVFB" ]; then kill "$XVFB" 2>/dev/null || :; wait "$XVFB" 2>/dev/null || :; fi
   rm -rf "$TEST"
 }
 trap cleanup EXIT INT TERM
+wait_gone() {
+  i=0
+  while kill -0 "$SAVER" 2>/dev/null; do
+    state=$(ps -o stat= -p "$SAVER" 2>/dev/null || true)
+    case "$state" in ''|Z*) break ;; esac
+    i=$((i+1)); [ "$i" -lt 40 ] || { echo "FAIL saver did not exit"; exit 1; }; sleep 0.05
+  done
+  wait "$SAVER"
+  SAVER=
+}
 mkdir -p "$TEST/bin"
 TEST_FONT=$(fc-match -f '%{file}' monospace)
 export TEST_FONT
@@ -88,6 +99,29 @@ done
 wait "$SAVER"
 SAVER=
 
+# The dismissing key or click never reaches the focused application, neither
+# its press nor its release (S3). xev stands in for a terminal under the pointer.
+xev -event keyboard -event button -geometry 400x300+0+0 > "$TEST/xev.log" 2>&1 & XEV=$!
+sleep 1
+xdotool mousemove 100 100
+xdotool windowfocus --sync "$(xdotool search --name '^Event Tester$' | head -1)"
+for input in key button; do
+  "$BIN" > "$TEST/saver-$input.log" 2>&1 & SAVER=$!
+  sleep 1
+  if [ "$input" = key ]; then xdotool keydown a; else xdotool mousedown 1; fi
+  sleep 0.3
+  kill -0 "$SAVER" || { echo "FAIL saver ungrabbed with the $input still down"; exit 1; }
+  if [ "$input" = key ]; then xdotool keyup a; else xdotool mouseup 1; fi
+  wait_gone
+done
+xdotool key b
+sleep 0.5
+kill "$XEV" 2>/dev/null || :; wait "$XEV" 2>/dev/null || :
+grep -q 'keysym 0x62, b' "$TEST/xev.log" || { echo "FAIL xev saw no control key"; exit 1; }
+if grep -q 'keysym 0x61, a' "$TEST/xev.log" || grep -q '^Button' "$TEST/xev.log"; then
+  grep -E '^(Key|Button)' -A2 "$TEST/xev.log"; echo "FAIL dismissing input leaked to the focused window"; exit 1
+fi
+
 # A second saver cannot claim success when the first already owns the grabs.
 "$BIN" > "$TEST/saver-first.log" 2>&1 & SAVER=$!
 sleep 1
@@ -99,4 +133,4 @@ grep -q 'cannot grab' "$TEST/saver-second.log" || { cat "$TEST/saver-second.log"
 kill "$SAVER" 2>/dev/null || true
 wait "$SAVER" 2>/dev/null || true
 SAVER=
-printf 'PASS: input, mouse, resize coverage, opacity hint and failed-grab handling\n'
+printf 'PASS: input, mouse, resize coverage, opacity hint, swallowed dismissal input and failed-grab handling\n'
