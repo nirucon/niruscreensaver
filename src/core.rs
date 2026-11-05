@@ -330,6 +330,28 @@ impl Surface {
             c.intern_atom(false, b"UTF8_STRING")?.reply()?.atom,
             name.as_bytes(),
         )?;
+        // A compositor must not dim the idle screen. picom applies a default
+        // opacity to frames of clients it does not know, and a window at 90%
+        // opacity shows the desktop through it, which also defeats the
+        // burn-in purpose. Asking for full opacity by name is the only thing a
+        // compositor is obliged to honour, and a window class gives it a
+        // stable name to match rules on. Same properties as NIRULOCK.
+        c.change_property32(
+            PropMode::REPLACE,
+            win,
+            c.intern_atom(false, b"_NET_WM_WINDOW_OPACITY")?
+                .reply()?
+                .atom,
+            AtomEnum::CARDINAL,
+            &[u32::MAX],
+        )?;
+        c.change_property8(
+            PropMode::REPLACE,
+            win,
+            AtomEnum::WM_CLASS,
+            AtomEnum::STRING,
+            format!("{name}\0{name}\0").as_bytes(),
+        )?;
         c.map_window(win)?;
         c.randr_select_input(
             screen.root,

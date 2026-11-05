@@ -67,6 +67,11 @@ geometry() {
 "$BIN" > "$TEST/saver-resize.log" 2>&1 & SAVER=$!
 sleep 1
 [ "$(geometry)" = 1024x768 ] || { echo "FAIL initial geometry: $(geometry)"; exit 1; }
+# A compositor must not dim the saver: full opacity and a stable class (S2).
+wid=$(xwininfo -root -tree | awk '/"NIRUSCREENSAVER"/{print $1; exit}')
+xprop -id "$wid" _NET_WM_WINDOW_OPACITY WM_CLASS > "$TEST/props"
+grep -qx '_NET_WM_WINDOW_OPACITY(CARDINAL) = 4294967295' "$TEST/props" || { cat "$TEST/props"; echo "FAIL opacity hint"; exit 1; }
+grep -qx 'WM_CLASS(STRING) = "NIRUSCREENSAVER", "NIRUSCREENSAVER"' "$TEST/props" || { cat "$TEST/props"; echo "FAIL WM_CLASS"; exit 1; }
 xrandr --fb 800x600 >/dev/null 2>&1 || true
 sleep 1
 [ "$(geometry)" = 800x600 ] || { echo "FAIL shrink geometry: $(geometry)"; exit 1; }
@@ -94,4 +99,4 @@ grep -q 'cannot grab' "$TEST/saver-second.log" || { cat "$TEST/saver-second.log"
 kill "$SAVER" 2>/dev/null || true
 wait "$SAVER" 2>/dev/null || true
 SAVER=
-printf 'PASS: input, mouse, resize coverage and failed-grab handling\n'
+printf 'PASS: input, mouse, resize coverage, opacity hint and failed-grab handling\n'
