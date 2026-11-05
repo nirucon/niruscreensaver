@@ -447,6 +447,9 @@ pub fn run(cfg: config::Config) -> Result<()> {
     // The playing track under the spectrum, followed only while it is live.
     let mut media = (cava.is_some() && cfg.show_media).then(media::Media::new);
     let started = Instant::now();
+    // The first frame fades in from black unless reduced motion is asked for.
+    let mut fade = (!cfg.reduced_motion).then(Instant::now);
+    let mut faded = cfg.clone();
     let mut next_full = Instant::now();
     let mut next_frame = Instant::now();
     let mut pending: Option<Event> = None;
@@ -520,9 +523,16 @@ pub fn run(cfg: config::Config) -> Result<()> {
                 idle_via_extension(&surface.c, root).unwrap_or_else(|| started.elapsed().as_secs());
             let spectrum = cava.as_mut().map(|cava| cava.values().to_vec());
             let track = media.as_ref().and_then(media::Media::line);
+            let level = fade.map_or(1.0, |start| {
+                fade_level(now.saturating_duration_since(start))
+            });
+            if level >= 1.0 {
+                fade = None;
+            }
+            faded.palette = dimmed(&cfg.palette, level);
             draw(
                 &mut surface,
-                &cfg,
+                &faded,
                 &mut text,
                 &mut big,
                 rune.as_mut(),
@@ -537,8 +547,14 @@ pub fn run(cfg: config::Config) -> Result<()> {
                 cfg.show_away_after_seconds,
             );
             next_full = now + Duration::from_millis(ms);
+            if fade.is_some() {
+                next_full = next_full.min(now + FADE_STEP);
+            }
             next_frame = now + FRAME;
-        } else if now >= next_frame && cava.as_ref().is_some_and(cava::Cava::animating) {
+        } else if fade.is_none()
+            && now >= next_frame
+            && cava.as_ref().is_some_and(cava::Cava::animating)
+        {
             // The 30 fps spectrum path makes no X round trip: the idle time is
             // only needed for the away text of a full frame. The frame that
             // detects two seconds of silence is drawn flat and is the last.
@@ -583,6 +599,38 @@ pub fn run(cfg: config::Config) -> Result<()> {
             }
             next_frame = Instant::now();
         }
+    }
+}
+
+/// How long the first frame takes to fade in from black, and how often it is
+/// redrawn meanwhile: ten frames, once.
+const FADE: Duration = Duration::from_millis(300);
+const FADE_STEP: Duration = Duration::from_millis(30);
+
+/// Brightness `elapsed` into the fade, eased so it neither pops nor lingers.
+fn fade_level(elapsed: Duration) -> f32 {
+    let t = (elapsed.as_secs_f32() / FADE.as_secs_f32()).clamp(0.0, 1.0);
+    if t >= 1.0 {
+        return 1.0;
+    }
+    t * t * (3.0 - 2.0 * t)
+}
+
+/// Every palette colour scaled towards black by `level` (1.0 is unchanged).
+fn dimmed(palette: &palette::Palette, level: f32) -> palette::Palette {
+    let dim = |colour: u32| {
+        let channel = |shift: u32| {
+            let value = f32::from(((colour >> shift) & 255) as u8);
+            ((value * level.clamp(0.0, 1.0)).round() as u32) << shift
+        };
+        channel(16) | channel(8) | channel(0)
+    };
+    palette::Palette {
+        background: dim(palette.background),
+        foreground: dim(palette.foreground),
+        muted: dim(palette.muted),
+        border: dim(palette.border),
+        focus: dim(palette.focus),
     }
 }
 
@@ -705,6 +753,26 @@ fn main() {
 #[cfg(test)]
 mod scheduling_tests {
     use super::{moved_far, next_redraw_ms};
+
+    #[test]
+    fn the_fade_starts_black_and_ends_at_the_theme() {
+        use super::{dimmed, fade_level, Duration, FADE};
+        assert_eq!(fade_level(Duration::ZERO), 0.0);
+        let half = fade_level(FADE / 2);
+        assert!(half > 0.4 && half < 0.6);
+        assert_eq!(fade_level(FADE), 1.0);
+        assert_eq!(fade_level(FADE * 3), 1.0);
+        let theme = crate::palette::Palette::default();
+        let black = dimmed(&theme, 0.0);
+        assert_eq!(
+            [black.foreground, black.muted, black.focus, black.background],
+            [0; 4]
+        );
+        let full = dimmed(&theme, 1.0);
+        assert_eq!(full.foreground, theme.foreground);
+        assert_eq!(full.focus, theme.focus);
+        assert_eq!(dimmed(&theme, 0.5).foreground, 0x737373);
+    }
 
     #[test]
     fn motion_dismisses_only_beyond_24_px() {

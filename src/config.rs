@@ -71,6 +71,8 @@ pub struct Config {
     pub dismiss_on_motion: bool,
     /// Show the playing MPRIS track under the CAVA spectrum.
     pub show_media: bool,
+    /// Skip the 300 ms fade-in.
+    pub reduced_motion: bool,
     pub palette: palette::Palette,
 }
 
@@ -258,6 +260,7 @@ impl Default for Config {
             show_away_after_seconds: 60,
             dismiss_on_motion: false,
             show_media: true,
+            reduced_motion: false,
             palette: palette::Palette::default(),
         }
     }
@@ -344,6 +347,9 @@ impl Config {
         if let Some(enabled) = v.get("show_media").and_then(|x| x.as_bool()) {
             cfg.show_media = enabled;
         }
+        if let Some(enabled) = v.get("reduced_motion").and_then(|x| x.as_bool()) {
+            cfg.reduced_motion = enabled;
+        }
         if let Some(t) = v.get("palette").and_then(|x| x.as_table()) {
             let get = |name: &str, fallback: u32| -> u32 {
                 t.get(name)
@@ -388,7 +394,7 @@ impl Config {
 
     pub fn describe(&self) -> String {
         format!(
-            "config: {}\nidle after: {} min\nlock {} min later\ndisplay off: {} min after locking\nlegacy lock_timeout_minutes: {} (ignored)\naway text after: {} s\nclock size: {}\nfont: {}\nlayout: {}\nvisualizer: {}\nrune font: {}\ndismiss on motion: {}\nshow media: {}",
+            "config: {}\nidle after: {} min\nlock {} min later\ndisplay off: {} min after locking\nlegacy lock_timeout_minutes: {} (ignored)\naway text after: {} s\nclock size: {}\nfont: {}\nlayout: {}\nvisualizer: {}\nrune font: {}\ndismiss on motion: {}\nshow media: {}\nreduced motion: {}",
             config_file().display(),
             self.idle_minutes,
             self.lock_after_minutes,
@@ -406,6 +412,7 @@ impl Config {
             self.rune_font_path.as_deref().unwrap_or("auto"),
             if self.dismiss_on_motion { "on" } else { "off" },
             if self.show_media { "on" } else { "off" },
+            if self.reduced_motion { "on" } else { "off" },
         )
     }
 }
@@ -446,6 +453,13 @@ mod tests {
         assert!(Config::default().show_media);
         let v: toml::Value = "show_media = false".parse().unwrap();
         assert!(!Config::from_value(&v).unwrap().show_media);
+    }
+
+    #[test]
+    fn reduced_motion_is_opt_in() {
+        assert!(!Config::default().reduced_motion);
+        let v: toml::Value = "reduced_motion = true".parse().unwrap();
+        assert!(Config::from_value(&v).unwrap().reduced_motion);
     }
 
     #[test]

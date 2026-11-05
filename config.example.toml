@@ -25,6 +25,9 @@ show_away_after_seconds = 60
 # moved more than 24 px since the screen appeared.
 dismiss_on_motion = false
 
+# The screen fades in from black over 300 ms; true shows it at once.
+reduced_motion = false
+
 [palette]
 background = "000000"
 foreground = "e5e5e5"
