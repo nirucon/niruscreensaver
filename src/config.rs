@@ -62,8 +62,15 @@ pub struct Config {
     pub lock_timeout_minutes: u32,
     /// Show "away for ..." once the screen has been idle this long.
     pub show_away_after_seconds: u32,
+    /// Dismiss when the pointer moves more than [`MOTION_DISMISS_PX`] from
+    /// where it was when the saver appeared. Off by default, so a bumped desk
+    /// does not wake the screen.
+    pub dismiss_on_motion: bool,
     pub palette: palette::Palette,
 }
+
+/// How far the pointer must move to dismiss with `dismiss_on_motion`.
+pub const MOTION_DISMISS_PX: i32 = 24;
 
 /// The built-in suite themes, for a component that does not carry the
 /// theme files itself. Only the text colours are used: the saver and locker
@@ -244,6 +251,7 @@ impl Default for Config {
             dpms_off_minutes: 15,
             lock_timeout_minutes: 0,
             show_away_after_seconds: 60,
+            dismiss_on_motion: false,
             palette: palette::Palette::default(),
         }
     }
@@ -324,6 +332,9 @@ impl Config {
         {
             cfg.show_away_after_seconds = n.clamp(0, 100_000) as u32;
         }
+        if let Some(enabled) = v.get("dismiss_on_motion").and_then(|x| x.as_bool()) {
+            cfg.dismiss_on_motion = enabled;
+        }
         if let Some(t) = v.get("palette").and_then(|x| x.as_table()) {
             let get = |name: &str, fallback: u32| -> u32 {
                 t.get(name)
@@ -368,7 +379,7 @@ impl Config {
 
     pub fn describe(&self) -> String {
         format!(
-            "config: {}\nidle after: {} min\nlock {} min later\ndisplay off: {} min after locking\nlegacy lock_timeout_minutes: {} (ignored)\naway text after: {} s\nclock size: {}\nfont: {}\nlayout: {}\nvisualizer: {}\nrune font: {}",
+            "config: {}\nidle after: {} min\nlock {} min later\ndisplay off: {} min after locking\nlegacy lock_timeout_minutes: {} (ignored)\naway text after: {} s\nclock size: {}\nfont: {}\nlayout: {}\nvisualizer: {}\nrune font: {}\ndismiss on motion: {}",
             config_file().display(),
             self.idle_minutes,
             self.lock_after_minutes,
@@ -384,6 +395,7 @@ impl Config {
             self.layout.as_str(),
             if self.visualizer { "on" } else { "off" },
             self.rune_font_path.as_deref().unwrap_or("auto"),
+            if self.dismiss_on_motion { "on" } else { "off" },
         )
     }
 }
@@ -410,6 +422,13 @@ mod tests {
         assert!(c.visualizer);
         assert_eq!(c.idle_minutes, 5);
         assert_eq!(c.dpms_off_minutes, 15);
+    }
+
+    #[test]
+    fn motion_dismissal_is_opt_in() {
+        assert!(!Config::default().dismiss_on_motion);
+        let v: toml::Value = "dismiss_on_motion = true".parse().unwrap();
+        assert!(Config::from_value(&v).unwrap().dismiss_on_motion);
     }
 
     #[test]

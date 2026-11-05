@@ -403,6 +403,15 @@ pub fn run(cfg: config::Config) -> Result<()> {
         }
         cava.set_display(power.on());
     }
+    // Where the pointer was when the saver appeared, for dismiss_on_motion.
+    let origin = cfg
+        .dismiss_on_motion
+        .then(|| {
+            let root = surface.c.setup().roots[surface.screen_num].root;
+            surface.c.query_pointer(root).ok()?.reply().ok()
+        })
+        .flatten()
+        .map(|p| (p.root_x, p.root_y));
     let started = Instant::now();
     let mut next_full = Instant::now();
     let mut next_frame = Instant::now();
@@ -430,6 +439,13 @@ pub fn run(cfg: config::Config) -> Result<()> {
                 // session can be used normally afterwards.
                 Event::KeyPress(_) | Event::ButtonPress(_) => {
                     wait_for_release(&surface)?;
+                    surface.release_input()?;
+                    return Ok(());
+                }
+                // Off by default: a bumped desk must not wake the screen.
+                Event::MotionNotify(e)
+                    if origin.is_some_and(|origin| moved_far(origin, (e.root_x, e.root_y))) =>
+                {
                     surface.release_input()?;
                     return Ok(());
                 }
@@ -576,6 +592,14 @@ fn input_held(surface: &core::Surface) -> Result<bool> {
 /// One spectrum frame, the same 30 fps as CAVA produces.
 const FRAME: Duration = Duration::from_millis(33);
 
+/// True once the pointer is more than `MOTION_DISMISS_PX` from `origin`.
+fn moved_far(origin: (i16, i16), now: (i16, i16)) -> bool {
+    let dx = i64::from(now.0) - i64::from(origin.0);
+    let dy = i64::from(now.1) - i64::from(origin.1);
+    let limit = i64::from(config::MOTION_DISMISS_PX);
+    dx * dx + dy * dy > limit * limit
+}
+
 fn next_redraw_ms(wall_ms: i64, idle: u64, show_after: u32) -> u64 {
     let clock = (60_000 - wall_ms.rem_euclid(60_000)) as u64;
     let away = if idle < u64::from(show_after) {
@@ -637,7 +661,17 @@ fn main() {
 
 #[cfg(test)]
 mod scheduling_tests {
-    use super::next_redraw_ms;
+    use super::{moved_far, next_redraw_ms};
+
+    #[test]
+    fn motion_dismisses_only_beyond_24_px() {
+        assert!(!moved_far((100, 100), (124, 100)));
+        assert!(!moved_far((100, 100), (116, 116)));
+        assert!(moved_far((100, 100), (125, 100)));
+        assert!(moved_far((100, 100), (80, 80)));
+        assert!(moved_far((i16::MAX, i16::MAX), (i16::MIN, i16::MIN)));
+    }
+
     #[test]
     fn waits_for_the_first_visible_change() {
         assert_eq!(next_redraw_ms(0, 0, 60), 60_000);

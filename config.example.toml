@@ -17,6 +17,11 @@ lock_after_minutes = 5
 dpms_off_minutes = 0
 show_away_after_seconds = 60
 
+# A key or click always dismisses the screen. Pointer motion does not, so a
+# bumped desk does not wake it; set this to dismiss after the pointer has
+# moved more than 24 px since the screen appeared.
+dismiss_on_motion = false
+
 [palette]
 background = "000000"
 foreground = "e5e5e5"

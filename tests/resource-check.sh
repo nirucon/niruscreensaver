@@ -122,6 +122,27 @@ if grep -q 'keysym 0x61, a' "$TEST/xev.log" || grep -q '^Button' "$TEST/xev.log"
   grep -E '^(Key|Button)' -A2 "$TEST/xev.log"; echo "FAIL dismissing input leaked to the focused window"; exit 1
 fi
 
+# Pointer motion dismisses only with dismiss_on_motion, beyond 24 px (S4).
+# Moves are relative to where the pointer is: Xvfb may refuse to warp it.
+pointer_to() {
+  eval "$(xdotool getmouselocation --shell)"
+  xdotool mousemove $((X + $1)) $((Y + $2))
+}
+"$BIN" > "$TEST/saver-motion.log" 2>&1 & SAVER=$!
+sleep 1
+pointer_to 200 150; sleep 0.5
+kill -0 "$SAVER" || { echo "FAIL motion dismissed by default"; exit 1; }
+xdotool key space; wait_gone
+mkdir -p "$XDG_CONFIG_HOME/niruui"
+printf 'dismiss_on_motion = true\n' > "$XDG_CONFIG_HOME/niruui/screensaver.toml"
+"$BIN" > "$TEST/saver-motion.log" 2>&1 & SAVER=$!
+sleep 1
+pointer_to 10 10; sleep 0.5
+kill -0 "$SAVER" || { echo "FAIL a 14 px move dismissed"; exit 1; }
+pointer_to 40 0; sleep 0.2
+wait_gone
+rm "$XDG_CONFIG_HOME/niruui/screensaver.toml"
+
 # A second saver cannot claim success when the first already owns the grabs.
 "$BIN" > "$TEST/saver-first.log" 2>&1 & SAVER=$!
 sleep 1
@@ -133,4 +154,4 @@ grep -q 'cannot grab' "$TEST/saver-second.log" || { cat "$TEST/saver-second.log"
 kill "$SAVER" 2>/dev/null || true
 wait "$SAVER" 2>/dev/null || true
 SAVER=
-printf 'PASS: input, mouse, resize coverage, opacity hint, swallowed dismissal input and failed-grab handling\n'
+printf 'PASS: input, mouse, resize coverage, opacity hint, swallowed dismissal input, motion and failed-grab handling\n'
