@@ -26,13 +26,15 @@ Xvfb :95 -screen 0 1024x768x24 -nolisten tcp > "$TEST/xvfb.log" 2>&1 & XVFB=$!
 sleep 1
 "$BIN" > "$TEST/saver.log" 2>&1 & SAVER=$!
 sleep 1
+# Start-up looks up the text and the rune font once each; exposures add none.
+startup=$(wc -l < "$FONT_LOG")
 for _ in 1 2 3 4 5; do xrefresh; sleep 0.2; done
 sleep 1
 kill -0 "$SAVER"
-probes=$(wc -l < "$FONT_LOG")
+probes=$(($(wc -l < "$FONT_LOG") - startup))
 rss=$(awk '/VmRSS:/{print $2}' "/proc/$SAVER/status")
-printf 'five exposures: font_discoveries=%s RSS_KiB=%s\n' "$probes" "$rss"
-if [ "$MODE" != baseline ]; then [ "$probes" -eq 1 ]; fi
+printf 'five exposures: startup_font_lookups=%s font_discoveries=%s RSS_KiB=%s\n' "$startup" "$probes" "$rss"
+if [ "$MODE" != baseline ]; then [ "$probes" -eq 0 ] && [ "$startup" -le 2 ]; fi
 xdotool key space
 i=0
 while kill -0 "$SAVER" 2>/dev/null; do
