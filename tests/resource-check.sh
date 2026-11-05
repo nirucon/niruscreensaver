@@ -143,6 +143,56 @@ pointer_to 40 0; sleep 0.2
 wait_gone
 rm "$XDG_CONFIG_HOME/niruui/screensaver.toml"
 
+# CAVA pauses for silence and resumes on sound (S1); the media line follows
+# only while the spectrum is live (U1). The fixture CAVA plays 3 s of bars,
+# 2 s of zeros, then writes nothing, as CAVA's sleep_timer does, until told
+# to resume. Wakeups are counted over every thread of the saver.
+i=0; : > "$TEST/loud.bin"; : > "$TEST/zero.bin"
+while [ "$i" -lt 48 ]; do printf '\320\007' >> "$TEST/loud.bin"; printf '\000\000' >> "$TEST/zero.bin"; i=$((i+1)); done
+mkfifo "$TEST/never"
+export FIXTURE=$TEST
+cat > "$TEST/bin/cava" <<'HELPER'
+#!/bin/sh
+frames() { i=0; while [ "$i" -lt "$2" ]; do cat "$FIXTURE/$1.bin"; sleep 0.033; i=$((i+1)); done; }
+frames loud 90
+frames zero 60
+while [ ! -e "$FIXTURE/resume" ]; do sleep 0.2; done
+frames loud 100000
+HELPER
+cat > "$TEST/bin/playerctl" <<'HELPER'
+#!/bin/sh
+printf 'Playing\tFixture Artist\tFixture Title\n'
+read -r _ < "$FIXTURE/never"
+HELPER
+chmod +x "$TEST/bin/cava" "$TEST/bin/playerctl"
+wakeups() { cat /proc/"$SAVER"/task/*/status | awk '/ctxt_switches/{s+=$2} END{print s+0}'; }
+ticks() { awk '{print $14+$15}' /proc/"$SAVER"/stat; }
+children() { pgrep -c -P "$SAVER" -x "$1" || :; }
+TMPDIR=$TEST NIRUSCREENSAVER_TRACE=1 "$BIN" > "$TEST/saver-cava.log" 2>&1 & SAVER=$!
+sleep 1.5
+[ "$(children cava)" -eq 1 ] || { echo "FAIL fixture cava not running"; exit 1; }
+[ "$(children playerctl)" -eq 1 ] || { echo "FAIL media follower not running while live"; exit 1; }
+ls "$TEST"/niru-cava-*.conf > /dev/null 2>&1 && { echo "FAIL cava config left after the first frame"; exit 1; }
+w0=$(wakeups); t0=$(ticks); sleep 1; live=$(($(wakeups) - w0)); live_ticks=$(($(ticks) - t0))
+# Silence starts at 3 s; the repaint must have stopped by 6 s.
+sleep 4.5
+w0=$(wakeups); t0=$(ticks); sleep 3; quiet=$(($(wakeups) - w0)); quiet_ticks=$(($(ticks) - t0))
+[ "$(children playerctl)" -eq 0 ] || { echo "FAIL media follower kept running in silence"; exit 1; }
+[ "$(children cava)" -eq 1 ] || { echo "FAIL cava should stay up in silence"; exit 1; }
+touch "$TEST/resume"
+sleep 1.5
+w0=$(wakeups); sleep 1; resumed=$(($(wakeups) - w0))
+printf 'cava fixture: live=%s/s (%s ticks) silent=%s/3s (%s ticks) resumed=%s/s\n' "$live" "$live_ticks" "$quiet" "$quiet_ticks" "$resumed"
+[ "$live" -ge 30 ] || { echo "FAIL no 30 fps repaint while live"; exit 1; }
+[ "$quiet" -le 6 ] || { echo "FAIL more than 2 wakeups/s in silence"; exit 1; }
+[ "$quiet_ticks" -le 1 ] || { echo "FAIL CPU used in silence"; exit 1; }
+[ "$resumed" -ge 30 ] || { echo "FAIL spectrum did not resume on sound"; exit 1; }
+[ "$(children playerctl)" -eq 1 ] || { echo "FAIL media follower not back with sound"; exit 1; }
+xdotool key space; wait_gone
+pgrep -f "$TEST/bin/cava" > /dev/null && { echo "FAIL cava outlived the saver"; exit 1; }
+pgrep -f "$TEST/bin/playerctl" > /dev/null && { echo "FAIL playerctl outlived the saver"; exit 1; }
+rm "$TEST/bin/cava" "$TEST/bin/playerctl"
+
 # A second saver cannot claim success when the first already owns the grabs.
 "$BIN" > "$TEST/saver-first.log" 2>&1 & SAVER=$!
 sleep 1
@@ -154,4 +204,4 @@ grep -q 'cannot grab' "$TEST/saver-second.log" || { cat "$TEST/saver-second.log"
 kill "$SAVER" 2>/dev/null || true
 wait "$SAVER" 2>/dev/null || true
 SAVER=
-printf 'PASS: input, mouse, resize coverage, opacity hint, swallowed dismissal input, motion and failed-grab handling\n'
+printf 'PASS: input, mouse, resize coverage, opacity hint, swallowed dismissal input, motion, CAVA silence pause, media follower and failed-grab handling\n'

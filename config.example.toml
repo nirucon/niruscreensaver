@@ -7,6 +7,9 @@ clock_size = 88.0
 # cava uses the active NIRUX theme and visualises system audio through CAVA.
 layout = "cava"
 visualizer = true
+# Show "Artist – Title" of the playing MPRIS player under the spectrum
+# (needs playerctl; followed only while the spectrum is live).
+show_media = true
 
 # Optional: use a specific runic font. Missing rune fonts simply omit the
 # ornament; the saver never draws missing-glyph boxes.

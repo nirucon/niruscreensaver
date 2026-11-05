@@ -14,6 +14,7 @@
 mod cava;
 mod config;
 mod core;
+mod media;
 mod palette;
 
 /// One error type for the whole program, so `?` works with X11, IO and
@@ -102,6 +103,7 @@ fn draw(
     hostname: &str,
     idle: u64,
     spectrum: Option<&[f32]>,
+    media: Option<&str>,
 ) -> Result<()> {
     let pal = &cfg.palette;
     surface.clear(pal.background)?;
@@ -316,6 +318,20 @@ fn draw(
             if let Some(values) = spectrum {
                 cava::paint(surface, pal, spec_x, spec_y, spec_w, spec_h, values)?;
             }
+            if let Some(media) = media {
+                let media = fit(text, media, i32::from(spec_w));
+                text.draw_centred(
+                    &surface.c,
+                    surface.gc,
+                    surface.back,
+                    surface.depth,
+                    centre_x,
+                    spec_y.saturating_add(spec_h as i16).saturating_add(line),
+                    &media,
+                    pal.muted,
+                    pal.background,
+                )?;
+            }
             if show_away {
                 text.draw_centred(
                     &surface.c,
@@ -335,6 +351,22 @@ fn draw(
     }
     surface.present()?;
     Ok(())
+}
+
+/// Shorten `value` with an ellipsis until it is at most `width` pixels wide.
+fn fit(text: &core::TextRenderer, value: &str, width: i32) -> String {
+    if i32::from(text.width(value)) <= width {
+        return value.to_string();
+    }
+    let mut chars: Vec<char> = value.chars().collect();
+    while !chars.is_empty() {
+        chars.pop();
+        let candidate: String = chars.iter().collect::<String>().trim_end().to_string() + "…";
+        if i32::from(text.width(&candidate)) <= width {
+            return candidate;
+        }
+    }
+    String::new()
 }
 
 fn cava_rect(surface: &core::Surface) -> (i16, i16, u16, u16) {
@@ -412,6 +444,8 @@ pub fn run(cfg: config::Config) -> Result<()> {
         })
         .flatten()
         .map(|p| (p.root_x, p.root_y));
+    // The playing track under the spectrum, followed only while it is live.
+    let mut media = (cava.is_some() && cfg.show_media).then(media::Media::new);
     let started = Instant::now();
     let mut next_full = Instant::now();
     let mut next_frame = Instant::now();
@@ -485,6 +519,7 @@ pub fn run(cfg: config::Config) -> Result<()> {
             let idle =
                 idle_via_extension(&surface.c, root).unwrap_or_else(|| started.elapsed().as_secs());
             let spectrum = cava.as_mut().map(|cava| cava.values().to_vec());
+            let track = media.as_ref().and_then(media::Media::line);
             draw(
                 &mut surface,
                 &cfg,
@@ -494,6 +529,7 @@ pub fn run(cfg: config::Config) -> Result<()> {
                 &hostname,
                 idle,
                 spectrum.as_deref(),
+                track.as_deref(),
             )?;
             let ms = next_redraw_ms(
                 Local::now().timestamp_millis(),
@@ -508,6 +544,13 @@ pub fn run(cfg: config::Config) -> Result<()> {
             // detects two seconds of silence is drawn flat and is the last.
             draw_cava_frame(&surface, &cfg, &mut cava)?;
             next_frame = now + FRAME;
+        }
+        if let Some(media) = media.as_mut() {
+            // Starts or stops playerctl only when the spectrum starts or stops.
+            media.set_active(cava.as_ref().is_some_and(cava::Cava::animating));
+            if media.take_changed() {
+                next_full = Instant::now();
+            }
         }
         surface.c.flush()?;
         // Round trips above may have queued events in x11rb, away from the fd.

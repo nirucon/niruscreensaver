@@ -69,6 +69,8 @@ pub struct Config {
     /// where it was when the saver appeared. Off by default, so a bumped desk
     /// does not wake the screen.
     pub dismiss_on_motion: bool,
+    /// Show the playing MPRIS track under the CAVA spectrum.
+    pub show_media: bool,
     pub palette: palette::Palette,
 }
 
@@ -255,6 +257,7 @@ impl Default for Config {
             lock_timeout_minutes: 0,
             show_away_after_seconds: 60,
             dismiss_on_motion: false,
+            show_media: true,
             palette: palette::Palette::default(),
         }
     }
@@ -338,6 +341,9 @@ impl Config {
         if let Some(enabled) = v.get("dismiss_on_motion").and_then(|x| x.as_bool()) {
             cfg.dismiss_on_motion = enabled;
         }
+        if let Some(enabled) = v.get("show_media").and_then(|x| x.as_bool()) {
+            cfg.show_media = enabled;
+        }
         if let Some(t) = v.get("palette").and_then(|x| x.as_table()) {
             let get = |name: &str, fallback: u32| -> u32 {
                 t.get(name)
@@ -382,7 +388,7 @@ impl Config {
 
     pub fn describe(&self) -> String {
         format!(
-            "config: {}\nidle after: {} min\nlock {} min later\ndisplay off: {} min after locking\nlegacy lock_timeout_minutes: {} (ignored)\naway text after: {} s\nclock size: {}\nfont: {}\nlayout: {}\nvisualizer: {}\nrune font: {}\ndismiss on motion: {}",
+            "config: {}\nidle after: {} min\nlock {} min later\ndisplay off: {} min after locking\nlegacy lock_timeout_minutes: {} (ignored)\naway text after: {} s\nclock size: {}\nfont: {}\nlayout: {}\nvisualizer: {}\nrune font: {}\ndismiss on motion: {}\nshow media: {}",
             config_file().display(),
             self.idle_minutes,
             self.lock_after_minutes,
@@ -399,6 +405,7 @@ impl Config {
             if self.visualizer { "on" } else { "off" },
             self.rune_font_path.as_deref().unwrap_or("auto"),
             if self.dismiss_on_motion { "on" } else { "off" },
+            if self.show_media { "on" } else { "off" },
         )
     }
 }
@@ -432,6 +439,13 @@ mod tests {
         assert!(!Config::default().dismiss_on_motion);
         let v: toml::Value = "dismiss_on_motion = true".parse().unwrap();
         assert!(Config::from_value(&v).unwrap().dismiss_on_motion);
+    }
+
+    #[test]
+    fn media_line_is_on_by_default_and_can_be_hidden() {
+        assert!(Config::default().show_media);
+        let v: toml::Value = "show_media = false".parse().unwrap();
+        assert!(!Config::from_value(&v).unwrap().show_media);
     }
 
     #[test]
