@@ -6,8 +6,14 @@
 //! not.
 //!
 //! The code is duplicated deliberately: each repository builds on its own with
-//! no private dependency, which keeps installation simple. The two copies are
-//! kept identical; `tests/identical.sh` compares their checksums.
+//! no private dependency, which keeps installation simple.
+//!
+//! Twin of NIRULOCK `src/core.rs`. The copies differ on purpose in input
+//! handling (this saver grabs in `Surface::new`, the lock grabs separately),
+//! resize and the away text, but the rendering and the window properties
+//! (opacity hint, `WM_CLASS`) must stay in step: port a fix to both. The
+//! verbatim twins `cava.rs` and `palette.rs` are checked against the pinned
+//! NIRULOCK tag by `tests/twin-drift.sh`.
 
 use ab_glyph::{Font, ScaleFont};
 use x11rb::{

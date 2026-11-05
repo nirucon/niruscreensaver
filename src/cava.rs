@@ -1,3 +1,5 @@
+// Twin of NIRULOCK src/cava.rs at the tag in tests/nirulock-tag. Copied verbatim: change
+// both repositories together; tests/twin-drift.sh fails CI on drift.
 //! Optional CAVA spectrum for the idle and lock screens.
 //!
 //! CAVA is started as a child process with a temporary config that emits raw

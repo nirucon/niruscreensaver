@@ -1,3 +1,6 @@
+// Twin of NIRULOCK src/config.rs. The settings differ by design (screensaver.toml
+// here, lock.toml there), but the theme and palette loading is shared: port a
+// fix to both repositories.
 //! `~/.config/niruui/screensaver.toml`
 //!
 //! The NIRU desktop programs share one directory for their settings so they

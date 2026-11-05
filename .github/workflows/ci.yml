@@ -19,7 +19,23 @@ jobs:
           sudo apt-get update && sudo apt-get install -y xvfb x11-utils x11-xserver-utils xdotool fonts-dejavu-core fontconfig procps
           cargo build --release --locked
           sh tests/resource-check.sh "$PWD/target/release/niruscreensaver"
+      - name: NIRULOCK twins have not drifted
+        run: sh tests/twin-drift.sh
       - name: Shellcheck
         run: |
           docker run --rm -v "$PWD":/src:ro koalaman/shellcheck:stable \
-            -S warning -s sh -e SC1007 /src/install.sh /src/tests/installer.sh
+            -S warning -s sh -e SC1007 /src/install.sh /src/tests/installer.sh \
+            /src/tests/resource-check.sh /src/tests/twin-drift.sh
+
+  msrv:
+    strategy:
+      matrix:
+        # The declared rust-version and Debian 13's rustc.
+        toolchain: ["1.75", "1.85"]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.toolchain }}
+      - run: cargo build --locked

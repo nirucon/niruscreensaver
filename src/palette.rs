@@ -1,3 +1,5 @@
+// Twin of NIRULOCK src/palette.rs at the tag in tests/nirulock-tag. Copied verbatim: change
+// both repositories together; tests/twin-drift.sh fails CI on drift.
 //! Default Niru Noir palette, shared field for field with NIRUWM and NIRUBAR.
 
 #[derive(Clone, Debug)]
