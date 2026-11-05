@@ -427,13 +427,15 @@ pub fn run(cfg: config::Config) -> Result<()> {
         }
         let now = Instant::now();
         if now >= repaint_at {
-            let idle =
-                idle_via_extension(&surface.c, root).unwrap_or_else(|| started.elapsed().as_secs());
             let cava_active = cava.as_ref().is_some_and(cava::Cava::running);
             if cava_active && now < next_full {
+                // The 30 fps spectrum path makes no X round trip: the idle
+                // time is only needed for the away text of a full frame.
                 draw_cava_frame(&surface, &cfg, &mut cava)?;
                 repaint_at = now + Duration::from_millis(33);
             } else {
+                let idle = idle_via_extension(&surface.c, root)
+                    .unwrap_or_else(|| started.elapsed().as_secs());
                 let spectrum = cava.as_mut().map(|cava| cava.values().to_vec());
                 draw(
                     &mut surface,
