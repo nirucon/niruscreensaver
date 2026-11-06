@@ -202,9 +202,11 @@ touch "$TEST/resume"
 PULSE_SERVER=unix:$TEST/no-server "$BIN" > "$TEST/saver-auto.log" 2>&1 & SAVER=$!
 sleep 3
 kill -0 "$SAVER" || { cat "$TEST/saver-auto.log"; exit 1; }
-quotes=$XDG_CONFIG_HOME/niru/quotes.txt
-[ -f "$quotes" ] || { echo "FAIL the default quotes file was not written"; exit 1; }
-[ "$(stat -c %a "$quotes")" = 644 ] || { echo "FAIL the quotes file is not 0644"; exit 1; }
+quotes=$XDG_CONFIG_HOME/niru/quotes
+for name in havamal-en havamal-sv stoic-en stoic-sv; do
+  [ -f "$quotes/$name.txt" ] || { echo "FAIL the collection $name was not written"; exit 1; }
+  [ "$(stat -c %a "$quotes/$name.txt")" = 644 ] || { echo "FAIL $name.txt is not 0644"; exit 1; }
+done
 [ "$(children cava)" -eq 0 ] || { echo "FAIL CAVA started without music"; exit 1; }
 # The drawing thread must sleep between quote changes. The audio detector's
 # own thread retries the missing sound server with a back-off (2 s, 4 s, ...
@@ -216,11 +218,13 @@ printf 'quotes: %s wakeups/3s on the drawing thread, %s in all threads (%s ticks
 [ "$main" -le 2 ] || { echo "FAIL the quote view woke between changes"; exit 1; }
 [ "$quiet" -le 30 ] || { echo "FAIL the audio detector retried too often"; exit 1; }
 [ "$quiet_ticks" -le 1 ] || { echo "FAIL CPU used on the quote view"; exit 1; }
-printf 'Mitt eget citat\n' > "$quotes"
+printf 'My own quote\n' > "$quotes/havamal-en.txt"
+rm "$quotes/stoic-sv.txt"
 xdotool key space; wait_gone
 PULSE_SERVER=unix:$TEST/no-server "$BIN" > "$TEST/saver-auto.log" 2>&1 & SAVER=$!
 sleep 2
-[ "$(cat "$quotes")" = "Mitt eget citat" ] || { echo "FAIL the quotes file was overwritten"; exit 1; }
+[ "$(cat "$quotes/havamal-en.txt")" = "My own quote" ] || { echo "FAIL a collection was overwritten"; exit 1; }
+[ ! -e "$quotes/stoic-sv.txt" ] || { echo "FAIL a deleted collection was recreated"; exit 1; }
 xdotool key space; wait_gone
 rm "$TEST/bin/cava" "$TEST/bin/playerctl"
 

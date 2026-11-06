@@ -425,7 +425,7 @@ pub fn run(cfg: config::Config) -> Result<()> {
         })
         .transpose()?;
     let hostname = core::hostname();
-    // The quotes file and the audio detector are read on their own threads.
+    // The quote collections and the audio detector are read on their own threads.
     let mut visual =
         (cfg.layout == config::Layout::Cava && cfg.visual != visual::Mode::None).then(|| {
             visual::Visual::new(
@@ -434,6 +434,7 @@ pub fn run(cfg: config::Config) -> Result<()> {
                 &text,
                 cfg.font_size,
                 "niruscreensaver",
+                &cfg.quotes,
             )
         });
     // The display power is only needed to pause the panel.

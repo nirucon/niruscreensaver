@@ -56,6 +56,8 @@ pub struct Config {
     /// music plays, quotes otherwise), `cava`, `quotes` or `none`.
     /// `visualizer = false` without `visual` means `none`.
     pub visual: crate::visual::Mode,
+    /// Patterns of the quote collections to show (`quotes`), default `*`.
+    pub quotes: Vec<String>,
     pub clock_size: f32,
     /// Start the screensaver after this many minutes of idle time.
     pub idle_minutes: u32,
@@ -257,6 +259,7 @@ impl Default for Config {
             layout: Layout::Cava,
             visualizer: true,
             visual: crate::visual::Mode::Auto,
+            quotes: crate::quotes::all(),
             clock_size: 88.0,
             idle_minutes: 15,
             lock_after_minutes: 15,
@@ -328,6 +331,9 @@ impl Config {
         if let Some(visual) = v.get("visual").and_then(|x| x.as_str()) {
             cfg.visual = crate::visual::Mode::parse(visual)
                 .ok_or_else(|| "visual must be auto, cava, quotes or none".to_string())?;
+        }
+        if let Some(quotes) = v.get("quotes") {
+            cfg.quotes = crate::quotes::patterns(quotes)?;
         }
         if let Some(t) = v.get("rune_font_path").and_then(|x| x.as_str()) {
             cfg.rune_font_path = Some(t.to_string());
@@ -406,7 +412,7 @@ impl Config {
 
     pub fn describe(&self) -> String {
         format!(
-            "config: {}\nidle after: {} min\nlock {} min later\ndisplay off: {} min after locking\nlegacy lock_timeout_minutes: {} (ignored)\naway text after: {} s\nclock size: {}\nfont: {}\nlayout: {}\nvisualizer: {}\nvisual: {}\nrune font: {}\ndismiss on motion: {}\nshow media: {}\nreduced motion: {}",
+            "config: {}\nidle after: {} min\nlock {} min later\ndisplay off: {} min after locking\nlegacy lock_timeout_minutes: {} (ignored)\naway text after: {} s\nclock size: {}\nfont: {}\nlayout: {}\nvisualizer: {}\nvisual: {}\nquotes: {}\nrune font: {}\ndismiss on motion: {}\nshow media: {}\nreduced motion: {}",
             config_file().display(),
             self.idle_minutes,
             self.lock_after_minutes,
@@ -422,6 +428,7 @@ impl Config {
             self.layout.as_str(),
             if self.visualizer { "on" } else { "off" },
             self.visual.as_str(),
+            self.quotes.join(", "),
             self.rune_font_path.as_deref().unwrap_or("auto"),
             if self.dismiss_on_motion { "on" } else { "off" },
             if self.show_media { "on" } else { "off" },
@@ -489,6 +496,20 @@ mod tests {
         let both = c("visualizer = false\nvisual = \"quotes\"").unwrap();
         assert_eq!(both.visual, Mode::Quotes);
         assert!(c("visual = \"loud\"").is_err());
+    }
+
+    #[test]
+    fn quotes_selects_collections_by_pattern() {
+        let c = |text: &str| Config::from_value(&text.parse().unwrap());
+        assert_eq!(Config::default().quotes, ["*"]);
+        assert_eq!(c("").unwrap().quotes, ["*"]);
+        assert_eq!(c("quotes = \"stoic-*\"").unwrap().quotes, ["stoic-*"]);
+        assert_eq!(
+            c("quotes = [\"havamal-sv\", \"stoic-sv\"]").unwrap().quotes,
+            ["havamal-sv", "stoic-sv"]
+        );
+        assert!(c("quotes = true").is_err());
+        assert!(Config::default().describe().contains("\nquotes: *\n"));
     }
 
     #[test]
