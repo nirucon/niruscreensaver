@@ -1,13 +1,14 @@
 //! Niruscreensaver: a dark idle screen with a clock.
 //!
-//! It draws the current time, the hostname and, once idle, how long the
+//! It draws the current time (and, with `show_hostname`, the hostname) and, once idle, how long the
 //! machine has been away. A key press or button press dismisses it.
 //!
 //! By default it does nothing on its own: NIRUWM starts it after the idle
 //! timeout. Run it directly to see it:
 //!
 //! ```text
-//! niruscreensaver --preview     show it now
+//! niruscreensaver               show it now, on every monitor
+//! niruscreensaver --preview     preview it on the focused monitor
 //! niruscreensaver --config      print the effective configuration
 //! ```
 
@@ -169,7 +170,7 @@ fn draw(
                 surface.depth,
                 x,
                 start,
-                &format!("{hostname}:~$ idle"),
+                &prompt_line(hostname, "idle"),
                 pal.muted,
                 pal.background,
             )?;
@@ -406,8 +407,8 @@ fn draw_cava_frame(
 /// wake-up or the next visible clock/away/quote deadline, never a polling
 /// tick. The panel is repainted at 30 fps only while the display is on and
 /// the spectrum has sound (see `cava::PowerGate`) or a fade runs.
-pub fn run(cfg: config::Config) -> Result<()> {
-    let mut surface = core::Surface::new("NIRUSCREENSAVER")?;
+pub fn run(cfg: config::Config, coverage: core::Coverage) -> Result<()> {
+    let mut surface = core::Surface::new("NIRUSCREENSAVER", coverage)?;
     let font = core::find_font(cfg.font_path.as_deref());
     if font.is_empty() {
         return Err("no monospace font found; set font_path in the config".into());
@@ -424,7 +425,11 @@ pub fn run(cfg: config::Config) -> Result<()> {
             )
         })
         .transpose()?;
-    let hostname = core::hostname();
+    let hostname = if cfg.show_hostname {
+        core::hostname()
+    } else {
+        String::new()
+    };
     // The quote collections and the audio detector are read on their own threads.
     let mut visual =
         (cfg.layout == config::Layout::Cava && cfg.visual != visual::Mode::None).then(|| {
@@ -751,6 +756,16 @@ fn wait_readable(fds: [Option<std::os::fd::RawFd>; 3], timeout_ms: i32) -> [bool
     poll.map(|p| p.fd >= 0 && p.revents & libc::POLLIN != 0)
 }
 
+/// The terminal layout's first line: `host:~$ idle`, or `~$ idle` while
+/// the hostname is hidden.
+fn prompt_line(hostname: &str, word: &str) -> String {
+    if hostname.is_empty() {
+        format!("~$ {word}")
+    } else {
+        format!("{hostname}:~$ {word}")
+    }
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let arg = args.first().map(String::as_str).unwrap_or("");
@@ -765,9 +780,16 @@ fn main() {
                 std::process::exit(1)
             }
         },
+        // No argument is the screensaver itself, over every monitor;
+        // --preview shows it on the focused (or primary) monitor only.
         "--preview" | "" => match config::Config::load() {
             Ok(cfg) => {
-                if let Err(e) = run(cfg) {
+                let coverage = if arg == "--preview" {
+                    core::Coverage::One
+                } else {
+                    core::Coverage::All
+                };
+                if let Err(e) = run(cfg, coverage) {
                     eprintln!("niruscreensaver: {e}");
                     std::process::exit(1)
                 }

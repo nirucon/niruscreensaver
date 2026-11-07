@@ -79,6 +79,9 @@ pub struct Config {
     pub show_media: bool,
     /// Skip the 300 ms fade-in.
     pub reduced_motion: bool,
+    /// Draw the machine's hostname under the clock. Off by default, so a
+    /// screen left in a shared place does not name the machine.
+    pub show_hostname: bool,
     pub palette: palette::Palette,
 }
 
@@ -269,6 +272,7 @@ impl Default for Config {
             dismiss_on_motion: false,
             show_media: true,
             reduced_motion: false,
+            show_hostname: false,
             palette: palette::Palette::default(),
         }
     }
@@ -368,6 +372,9 @@ impl Config {
         if let Some(enabled) = v.get("reduced_motion").and_then(|x| x.as_bool()) {
             cfg.reduced_motion = enabled;
         }
+        if let Some(enabled) = v.get("show_hostname").and_then(|x| x.as_bool()) {
+            cfg.show_hostname = enabled;
+        }
         if let Some(t) = v.get("palette").and_then(|x| x.as_table()) {
             let get = |name: &str, fallback: u32| -> u32 {
                 t.get(name)
@@ -412,7 +419,7 @@ impl Config {
 
     pub fn describe(&self) -> String {
         format!(
-            "config: {}\nidle after: {} min\nlock {} min later\ndisplay off: {} min after locking\nlegacy lock_timeout_minutes: {} (ignored)\naway text after: {} s\nclock size: {}\nfont: {}\nlayout: {}\nvisualizer: {}\nvisual: {}\nquotes: {}\nrune font: {}\ndismiss on motion: {}\nshow media: {}\nreduced motion: {}",
+            "config: {}\nidle after: {} min\nlock {} min later\ndisplay off: {} min after locking\nlegacy lock_timeout_minutes: {} (ignored)\naway text after: {} s\nclock size: {}\nfont: {}\nlayout: {}\nvisualizer: {}\nvisual: {}\nquotes: {}\nrune font: {}\ndismiss on motion: {}\nshow media: {}\nreduced motion: {}\nshow hostname: {}",
             config_file().display(),
             self.idle_minutes,
             self.lock_after_minutes,
@@ -433,6 +440,7 @@ impl Config {
             if self.dismiss_on_motion { "on" } else { "off" },
             if self.show_media { "on" } else { "off" },
             if self.reduced_motion { "on" } else { "off" },
+            if self.show_hostname { "on" } else { "off" },
         )
     }
 }
@@ -556,5 +564,12 @@ mod tests {
         assert_eq!(p.focus, 0x040506);
         assert_eq!(p.background, 0x000000);
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn hostname_is_hidden_unless_asked_for() {
+        assert!(!Config::default().show_hostname);
+        let v: toml::Value = "show_hostname = true".parse().unwrap();
+        assert!(Config::from_value(&v).unwrap().show_hostname);
     }
 }

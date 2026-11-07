@@ -11,7 +11,7 @@ Small X11 idle screen with date, clock, away time and a themed CAVA spectrum or 
 NIRUSCREENSAVER is the first step of the NIRUX idle ladder: after a while
 without input, `niruidle` (from NIRUWM) shows it, and later NIRULOCK takes
 over. It covers every screen with an opaque, calm composition in the active
-NIRUX theme: the date, a large clock, the hostname, how long you have been
+NIRUX theme: the date, a large clock, how long you have been
 away and, while music plays, a live CAVA spectrum with the playing track.
 When it is quiet it shows quotes from Hávamál or the Stoics instead.
 
@@ -73,23 +73,29 @@ NIRUX-owned binaries are maintained with `nirux update`.
 ## Usage
 
 ```sh
-niruscreensaver             # show it now (same as --preview)
+niruscreensaver             # show it now, on every monitor
+niruscreensaver --preview   # preview it on one monitor (focused, else primary)
 niruscreensaver --config    # print the effective settings
 niruscreensaver --version
 ```
 
-`niructl screensaver` shows it from the session, and `niruidle` starts it
+`--preview` covers only the monitor with the focused window (else the one
+under the pointer, else the primary), so the other screens stay usable for
+comparison. `niructl screensaver` shows it from the session on every monitor, and `niruidle` starts it
 automatically after the idle timeout. Any key or click dismisses it.
 
 ### Layouts
 
 | Layout | Composition |
 |---|---|
-| `cava` | Default. Large clock and hostname above the spectrum or a quote |
-| `minimal` | Large centred clock and hostname |
-| `terminal` | Left-aligned monospace screen with a `hostname:~$ idle` line |
+| `cava` | Default. Large clock above the spectrum or a quote |
+| `minimal` | Large centred clock |
+| `terminal` | Left-aligned monospace screen with a `~$ idle` line |
 | `runic` | The clock with a discreet rune row when a runic font is available |
-| `corner` | Clock top-left, hostname and away time at the bottom |
+| `corner` | Clock top-left, away time at the bottom |
+
+The hostname is not shown unless you set `show_hostname = true`; it then
+appears under the clock (`hostname:~$ idle` in `terminal`).
 
 ### Music or quotes
 
@@ -123,6 +129,7 @@ clock_size = 88.0
 show_away_after_seconds = 60
 dismiss_on_motion = false       # true: dismiss after 24 px of pointer motion
 reduced_motion = false          # true: no fades
+show_hostname = false           # true: show the machine name under the clock
 ```
 
 **Timing** (when the screensaver appears, when the lock follows, when the

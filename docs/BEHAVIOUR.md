@@ -27,7 +27,7 @@ as NIRUAMP. Only the spectrum rectangle is repainted between full clock frames,
 and CopyArea exposures are disabled. Bars are drawn from the active NIRUX
 theme's focus colour, with a lighter peak, so the spectrum follows every suite
 theme. Set `visualizer = false` to keep the cava composition without the
-spectrum. If CAVA is not installed, the clock and hostname are still shown;
+spectrum. If CAVA is not installed, the clock (and the hostname, with `show_hostname = true`) is still shown;
 install `cava` to enable the bars. With the default `visual = "auto"` CAVA
 only runs while music plays.
 

@@ -279,10 +279,128 @@ pub fn away_text(seconds: u64) -> String {
     }
 }
 
+/// What the saver window covers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Coverage {
+    /// The whole root window, every monitor: the idle screensaver.
+    All,
+    /// One monitor (the focused one, else the one under the pointer, else
+    /// the primary): `--preview`, so the other screens stay visible.
+    One,
+}
+
+/// A monitor rectangle in root coordinates.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Area {
+    pub x: i16,
+    pub y: i16,
+    pub width: u16,
+    pub height: u16,
+    pub primary: bool,
+}
+
+impl Area {
+    fn contains(&self, (px, py): (i16, i16)) -> bool {
+        let (px, py) = (i32::from(px), i32::from(py));
+        let (x, y) = (i32::from(self.x), i32::from(self.y));
+        px >= x && py >= y && px < x + i32::from(self.width) && py < y + i32::from(self.height)
+    }
+}
+
+/// The monitor a one-monitor preview uses: the one holding the centre of the
+/// focused window, else the one under the pointer, else the primary, else the
+/// first. `None` without monitors, which means "cover the root".
+pub fn choose_area(
+    monitors: &[Area],
+    focus: Option<(i16, i16)>,
+    pointer: Option<(i16, i16)>,
+) -> Option<Area> {
+    let at = |p: Option<(i16, i16)>| p.and_then(|p| monitors.iter().find(|m| m.contains(p)));
+    at(focus)
+        .or_else(|| at(pointer))
+        .or_else(|| monitors.iter().find(|m| m.primary))
+        .or_else(|| monitors.first())
+        .copied()
+}
+
+/// The active RandR monitors, or none when RandR 1.5 is unavailable.
+fn monitors(c: &RustConnection, root: Window) -> Vec<Area> {
+    let Some(reply) = c
+        .randr_get_monitors(root, true)
+        .ok()
+        .and_then(|cookie| cookie.reply().ok())
+    else {
+        return Vec::new();
+    };
+    reply
+        .monitors
+        .iter()
+        .filter(|m| m.width > 0 && m.height > 0)
+        .map(|m| Area {
+            x: m.x,
+            y: m.y,
+            width: m.width,
+            height: m.height,
+            primary: m.primary,
+        })
+        .collect()
+}
+
+/// Centre of the window manager's active window, in root coordinates.
+fn focus_centre(c: &RustConnection, root: Window) -> Option<(i16, i16)> {
+    let atom = |name: &[u8]| Some(c.intern_atom(false, name).ok()?.reply().ok()?.atom);
+    let active = atom(b"_NET_ACTIVE_WINDOW")?;
+    let reply = c
+        .get_property(false, root, active, AtomEnum::WINDOW, 0, 1)
+        .ok()?
+        .reply()
+        .ok()?;
+    let win = reply.value32()?.next().filter(|w| *w != x11rb::NONE)?;
+    let geometry = c.get_geometry(win).ok()?.reply().ok()?;
+    let origin = c
+        .translate_coordinates(win, root, 0, 0)
+        .ok()?
+        .reply()
+        .ok()?;
+    let half = |v: u16| i16::try_from(v / 2).unwrap_or(i16::MAX);
+    Some((
+        origin.dst_x.saturating_add(half(geometry.width)),
+        origin.dst_y.saturating_add(half(geometry.height)),
+    ))
+}
+
+/// The rectangle a surface with `coverage` should occupy right now.
+fn target_area(c: &RustConnection, screen: &Screen, coverage: Coverage) -> Area {
+    let root = Area {
+        x: 0,
+        y: 0,
+        width: screen.width_in_pixels,
+        height: screen.height_in_pixels,
+        primary: true,
+    };
+    if coverage == Coverage::All {
+        return root;
+    }
+    let pointer = c
+        .query_pointer(screen.root)
+        .ok()
+        .and_then(|cookie| cookie.reply().ok())
+        .map(|p| (p.root_x, p.root_y));
+    choose_area(
+        &monitors(c, screen.root),
+        focus_centre(c, screen.root),
+        pointer,
+    )
+    .unwrap_or(root)
+}
+
 /// A full-screen override-redirect window and the resources to draw on it.
 pub struct Surface {
     pub c: RustConnection,
     pub screen_num: usize,
+    pub coverage: Coverage,
+    pub x: i16,
+    pub y: i16,
     pub width: u16,
     pub height: u16,
     pub depth: u8,
@@ -294,11 +412,11 @@ pub struct Surface {
 }
 
 impl Surface {
-    pub fn new(name: &str) -> crate::Result<Self> {
+    pub fn new(name: &str, coverage: Coverage) -> crate::Result<Self> {
         let (c, screen_num) = x11rb::connect(None)?;
         let screen = &c.setup().roots[screen_num];
-        let width = screen.width_in_pixels;
-        let height = screen.height_in_pixels;
+        let area = target_area(&c, screen, coverage);
+        let (x, y, width, height) = (area.x, area.y, area.width, area.height);
         let depth = screen.root_depth;
         let win = c.generate_id()?;
         let gc = c.generate_id()?;
@@ -307,8 +425,8 @@ impl Surface {
             depth,
             win,
             screen.root,
-            0,
-            0,
+            x,
+            y,
             width,
             height,
             0,
@@ -413,6 +531,9 @@ impl Surface {
         Ok(Self {
             c,
             screen_num,
+            coverage,
+            x,
+            y,
             width,
             height,
             depth,
@@ -446,13 +567,25 @@ impl Surface {
     pub fn resize(&mut self) -> crate::Result<bool> {
         let root = self.c.setup().roots[self.screen_num].root;
         let geometry = self.c.get_geometry(root)?.reply()?;
-        let (width, height) = (geometry.width, geometry.height);
-        if width == self.width && height == self.height {
+        let (x, y, width, height) = if self.coverage == Coverage::All {
+            (0, 0, geometry.width, geometry.height)
+        } else {
+            // The cached setup holds the size at connect time; the live root
+            // geometry is the fallback when the monitor list is empty.
+            let mut screen = self.c.setup().roots[self.screen_num].clone();
+            screen.width_in_pixels = geometry.width;
+            screen.height_in_pixels = geometry.height;
+            let a = target_area(&self.c, &screen, self.coverage);
+            (a.x, a.y, a.width, a.height)
+        };
+        if (x, y, width, height) == (self.x, self.y, self.width, self.height) {
             return Ok(false);
         }
         self.c.configure_window(
             self.win,
             &ConfigureWindowAux::new()
+                .x(i32::from(x))
+                .y(i32::from(y))
                 .width(u32::from(width))
                 .height(u32::from(height))
                 .stack_mode(StackMode::ABOVE),
@@ -462,6 +595,8 @@ impl Surface {
         self.c
             .create_pixmap(self.depth, back, root, width, height)?;
         self.back = back;
+        self.x = x;
+        self.y = y;
         self.width = width;
         self.height = height;
         self.c
@@ -589,6 +724,42 @@ mod tests {
         let t = clock_text(now);
         assert_eq!(t.len(), 17);
         assert!(!t.contains("lör"));
+    }
+
+    #[test]
+    fn preview_picks_focus_then_pointer_then_primary() {
+        let upper = Area {
+            x: 0,
+            y: 0,
+            width: 2560,
+            height: 1440,
+            primary: false,
+        };
+        let lower = Area {
+            y: 1440,
+            primary: true,
+            ..upper
+        };
+        let both = [upper, lower];
+        assert_eq!(
+            choose_area(&both, Some((100, 100)), Some((5, 2000))),
+            Some(upper)
+        );
+        assert_eq!(choose_area(&both, None, Some((5, 2000))), Some(lower));
+        assert_eq!(
+            choose_area(&both, Some((-5, -5)), Some((5, 1439))),
+            Some(upper)
+        );
+        assert_eq!(choose_area(&both, None, None), Some(lower));
+        let no_primary = [
+            upper,
+            Area {
+                primary: false,
+                ..lower
+            },
+        ];
+        assert_eq!(choose_area(&no_primary, None, None), Some(upper));
+        assert_eq!(choose_area(&[], Some((0, 0)), None), None);
     }
 
     #[test]
