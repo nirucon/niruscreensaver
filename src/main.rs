@@ -112,6 +112,7 @@ fn draw(
     idle: u64,
     visual: Option<&mut visual::Visual>,
     media: Option<&str>,
+    metrics: &Metrics,
 ) -> Result<()> {
     let pal = &cfg.palette;
     surface.clear(pal.background)?;
@@ -299,42 +300,47 @@ fn draw(
             }
         }
         config::Layout::Cava => {
-            let (spec_x, spec_y, spec_w, spec_h) = cava_rect(surface);
-            let clock_baseline = spec_y.saturating_sub(line * 2);
+            let stack = cava_stack(surface, metrics, !hostname.is_empty(), cfg.show_media);
+            let y = |v: i32| v.clamp(i16::MIN as i32, i16::MAX as i32) as i16;
             big.draw_centred(
                 &surface.c,
                 surface.gc,
                 surface.back,
                 surface.depth,
                 centre_x,
-                clock_baseline,
+                y(stack.clock),
                 &core::clock_text(Local::now()),
                 pal.foreground,
                 pal.background,
             )?;
-            text.draw_centred(
-                &surface.c,
-                surface.gc,
-                surface.back,
-                surface.depth,
-                centre_x,
-                spec_y.saturating_sub(line / 2),
-                hostname,
-                pal.muted,
-                pal.background,
-            )?;
-            if let Some(visual) = visual {
-                visual.paint(surface, pal, (spec_x, spec_y, spec_w, spec_h))?;
-            }
-            if let Some(media) = media {
-                let media = fit(text, media, i32::from(spec_w));
+            if let Some(baseline) = stack.hostname {
+                let host = fit(text, hostname, i32::from(stack.rect.2));
                 text.draw_centred(
                     &surface.c,
                     surface.gc,
                     surface.back,
                     surface.depth,
                     centre_x,
-                    spec_y.saturating_add(spec_h as i16).saturating_add(line),
+                    y(baseline),
+                    &host,
+                    pal.muted,
+                    pal.background,
+                )?;
+            }
+            if let Some(visual) = visual {
+                visual.paint(surface, pal, stack.rect)?;
+            }
+            // The track and the away time have fixed rows, so neither moves
+            // when the other comes or goes.
+            if let Some(media) = media {
+                let media = fit(text, media, i32::from(stack.rect.2));
+                text.draw_centred(
+                    &surface.c,
+                    surface.gc,
+                    surface.back,
+                    surface.depth,
+                    centre_x,
+                    y(stack.media),
                     &media,
                     pal.muted,
                     pal.background,
@@ -347,9 +353,7 @@ fn draw(
                     surface.back,
                     surface.depth,
                     centre_x,
-                    spec_y
-                        .saturating_add(spec_h as i16)
-                        .saturating_add(line * 2),
+                    y(stack.away),
                     &away,
                     pal.border.max(pal.focus),
                     pal.background,
@@ -377,14 +381,118 @@ fn fit(text: &core::TextRenderer, value: &str, width: i32) -> String {
     String::new()
 }
 
-fn cava_rect(surface: &core::Surface) -> (i16, i16, u16, u16) {
-    let width = i32::from(surface.width);
-    let height = i32::from(surface.height);
-    let spec_w = ((width as f32 * 0.58) as i32).clamp(320, 1100) as u16;
-    let spec_h = ((height as f32 * 0.17) as i32).clamp(96, 210) as u16;
-    let spec_x = ((width - i32::from(spec_w)) / 2).clamp(i16::MIN as i32, i16::MAX as i32) as i16;
-    let spec_y = ((height - i32::from(spec_h)) / 2).clamp(i16::MIN as i32, i16::MAX as i32) as i16;
-    (spec_x, spec_y, spec_w, spec_h)
+/// Vertical font metrics for the `cava` layout, measured once.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Metrics {
+    line: i32,
+    ascent: i32,
+    descent: i32,
+    /// The clock's inked height above and below the baseline.
+    clock_ascent: i32,
+    clock_descent: i32,
+}
+
+impl Metrics {
+    fn new(text: &core::TextRenderer, big: &mut core::TextRenderer) -> Self {
+        let ink = big.ink("0123456789-:");
+        Self {
+            line: i32::from(text.line_height()).max(1),
+            ascent: i32::from(text.ascent()),
+            descent: i32::from(text.descent()),
+            clock_ascent: ink.map_or(i32::from(big.ascent()), |i| -i.1),
+            clock_descent: ink.map_or(0, |i| i.3.max(0)),
+        }
+    }
+}
+
+/// The `cava` layout's column: baselines and the panel.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Stack {
+    clock: i32,
+    hostname: Option<i32>,
+    rect: (i16, i16, u16, u16),
+    media: i32,
+    away: i32,
+}
+
+/// The widest spectrum not wider than `want` whose 48 bars and gaps fill it
+/// exactly (the gap rule of `cava::paint`), so the guides end with the bars.
+fn snap_spectrum(want: i32) -> i32 {
+    const BARS: i32 = 48;
+    let gap = |w: i32| if w >= 600 { 2 } else { 1 };
+    let mut width = want.max(BARS);
+    loop {
+        let g = gap(width);
+        let used = ((width - g * (BARS - 1)) / BARS).max(1) * BARS + g * (BARS - 1);
+        if gap(used) == g || width <= BARS {
+            return used;
+        }
+        width -= 1;
+    }
+}
+
+/// Clock, hostname, panel, track and away time in one column, with a fixed
+/// rhythm in line heights; the block's middle sits at 47 % of the screen
+/// (the optical centre). Rows that come and go are reserved.
+fn stack_in(width: i32, height: i32, m: &Metrics, hostname: bool, media: bool) -> Stack {
+    let u = m.line as f32;
+    let r = |v: f32| v.round() as i32;
+    let margin = r(u * 1.5);
+    let spec_w = snap_spectrum(
+        ((width as f32 * 0.58) as i32)
+            .clamp(320, 1100)
+            .min(width - 2 * margin),
+    );
+    let mut spec_h = ((height as f32 * 0.17) as i32).clamp(96, 210);
+    let place = |spec_h: i32| {
+        let clock = m.clock_ascent;
+        let mut cur = clock + m.clock_descent;
+        let host = hostname.then(|| {
+            let base = cur + r(u * 0.6) + m.ascent;
+            cur = base + m.descent;
+            base
+        });
+        let panel = cur + r(u * 1.4);
+        // The track's row is reserved whenever it can be shown.
+        let (media, away) = if media {
+            let base = panel + spec_h + r(u * 1.0) + m.ascent;
+            (base, base + r(u * 1.5))
+        } else {
+            let away = panel + spec_h + r(u * 1.6) + m.ascent;
+            (away, away)
+        };
+        (clock, host, panel, media, away, away + m.descent)
+    };
+    let mut laid = place(spec_h);
+    while laid.5 > height - 2 * margin && spec_h > 32 {
+        spec_h -= 4;
+        laid = place(spec_h);
+    }
+    let (clock, host, panel, media, away, block) = laid;
+    let top = (r(height as f32 * 0.47) - block / 2).max(margin.min(height / 20));
+    let clamp = |v: i32| v.clamp(i16::MIN as i32, i16::MAX as i32) as i16;
+    Stack {
+        clock: top + clock,
+        hostname: host.map(|b| top + b),
+        rect: (
+            clamp(width / 2 - spec_w / 2),
+            clamp(top + panel),
+            spec_w.clamp(1, i32::from(u16::MAX)) as u16,
+            spec_h.clamp(1, i32::from(u16::MAX)) as u16,
+        ),
+        media: top + media,
+        away: top + away,
+    }
+}
+
+fn cava_stack(surface: &core::Surface, m: &Metrics, hostname: bool, media: bool) -> Stack {
+    stack_in(
+        i32::from(surface.width),
+        i32::from(surface.height),
+        m,
+        hostname,
+        media,
+    )
 }
 
 /// Repaint only the CAVA panel (spectrum or quote) between full frames.
@@ -392,6 +500,8 @@ fn draw_cava_frame(
     surface: &core::Surface,
     cfg: &config::Config,
     visual: &mut Option<visual::Visual>,
+    metrics: &Metrics,
+    hostname: bool,
 ) -> Result<()> {
     if cfg.layout != config::Layout::Cava {
         return Ok(());
@@ -399,7 +509,7 @@ fn draw_cava_frame(
     let Some(visual) = visual.as_mut() else {
         return Ok(());
     };
-    let (x, y, width, height) = cava_rect(surface);
+    let (x, y, width, height) = cava_stack(surface, metrics, hostname, cfg.show_media).rect;
     visual.paint(surface, &cfg.palette, (x, y, width, height))?;
     surface.present_rect(x, y, width, height)?;
     Ok(())
@@ -420,6 +530,7 @@ pub fn run(cfg: config::Config, coverage: core::Coverage) -> Result<()> {
     let setup = surface.c.setup().clone();
     let mut text = core::TextRenderer::new(&font, cfg.font_size, &setup)?;
     let mut big = text.at_size(cfg.clock_size);
+    let metrics = Metrics::new(&text, &mut big);
     let mut rune = core::find_rune_font(cfg.rune_font_path.as_deref())
         .map(|font| {
             core::TextRenderer::new(
@@ -566,6 +677,7 @@ pub fn run(cfg: config::Config, coverage: core::Coverage) -> Result<()> {
                 idle,
                 visual.as_mut(),
                 track.as_deref(),
+                &metrics,
             )?;
             let ms = next_redraw_ms(
                 Local::now().timestamp_millis(),
@@ -588,7 +700,7 @@ pub fn run(cfg: config::Config, coverage: core::Coverage) -> Result<()> {
             // spectrum is painted when CAVA delivers a frame, so each one is
             // shown once. The frame that detects two seconds of silence is
             // drawn flat and is the last.
-            draw_cava_frame(&surface, &cfg, &mut visual)?;
+            draw_cava_frame(&surface, &cfg, &mut visual, &metrics, !hostname.is_empty())?;
         }
         if let Some(media) = media.as_mut() {
             // Starts or stops playerctl only when the spectrum starts or stops.
@@ -844,5 +956,76 @@ mod scheduling_tests {
         assert_eq!(next_redraw_ms(1_500, 58, 60), 2_000);
         assert_eq!(next_redraw_ms(59_750, 60, 60), 250);
         assert_eq!(next_redraw_ms(0, 61, 60), 59_000);
+    }
+}
+
+#[cfg(test)]
+mod layout_tests {
+    use super::{snap_spectrum, stack_in, Metrics};
+
+    fn metrics(size: i32, clock: i32) -> Metrics {
+        Metrics {
+            line: size * 132 / 100,
+            ascent: size * 102 / 100,
+            descent: size * 30 / 100,
+            clock_ascent: clock * 73 / 100,
+            clock_descent: 1,
+        }
+    }
+
+    #[test]
+    fn the_cava_column_never_overlaps_and_stays_on_screen() {
+        for (w, h) in [
+            (800, 600),
+            (1280, 800),
+            (1920, 1200),
+            (2560, 1440),
+            (3840, 2160),
+        ] {
+            for (size, clock) in [(11, 60), (15, 88), (22, 120)] {
+                let m = metrics(size, clock);
+                for (host, media) in [(false, false), (true, true), (false, true)] {
+                    let s = stack_in(w, h, &m, host, media);
+                    let (x, y, sw, sh) = s.rect;
+                    let (y, sh) = (i32::from(y), i32::from(sh));
+                    let mut bands = vec![(s.clock - m.clock_ascent, s.clock + m.clock_descent)];
+                    if let Some(b) = s.hostname {
+                        bands.push((b - m.ascent, b + m.descent));
+                    }
+                    bands.push((y, y + sh));
+                    if media {
+                        bands.push((s.media - m.ascent, s.media + m.descent));
+                    }
+                    bands.push((s.away - m.ascent, s.away + m.descent));
+                    for pair in bands.windows(2) {
+                        assert!(pair[0].1 < pair[1].0, "{w}x{h} {size}: {bands:?}");
+                    }
+                    assert!(
+                        bands[0].0 >= 0 && bands.last().unwrap().1 <= h,
+                        "{w}x{h}: {bands:?}"
+                    );
+                    // The panel is centred on the same column as the text.
+                    assert!((i32::from(x) * 2 + i32::from(sw) - w).abs() <= 1);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_block_sits_at_the_optical_centre() {
+        let m = metrics(15, 88);
+        let s = stack_in(1920, 1200, &m, false, true);
+        let middle = (s.clock - m.clock_ascent + s.away + m.descent) / 2;
+        assert!((middle - 1200 * 47 / 100).abs() <= 2, "{middle}");
+    }
+
+    #[test]
+    fn spectrum_widths_fill_exactly_with_bars() {
+        for want in [320, 599, 600, 601, 1100] {
+            let w = snap_spectrum(want);
+            let gap = if w >= 600 { 2 } else { 1 };
+            assert_eq!((w - gap * 47) / 48 * 48 + gap * 47, w);
+            assert!(w <= want);
+        }
     }
 }
