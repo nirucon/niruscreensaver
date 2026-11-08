@@ -30,7 +30,7 @@ NIRULOCK's job.
 - Full opacity even under picom, a 300 ms fade-in (off with
   `reduced_motion`) and full coverage across output changes.
 - Power-aware: with the display off or in silence, CAVA, `playerctl` and the
-  30 fps repaint stop completely.
+  spectrum repaint stop completely.
 - Shares its CAVA, audio-detection, quote code and quote collections verbatim
   with NIRULOCK.
 
@@ -184,8 +184,10 @@ sh tests/twin-drift.sh                                      # needs network
 `tests/twin-drift.sh` checks that the code and quote files shared with
 NIRULOCK match the tag in `tests/nirulock-tag`.
 `NIRU_CAVA_TRACE=/path/to/file` appends one line per spectrum frame (the
-milliseconds since start, `L`ive, `S`ilent or display `O`ff, and the 48 bar
-heights) for measuring motion and frame pacing; it records nothing else.
+milliseconds since start, `L`ive, `S`ilent or display `O`ff, the sequence
+number of the CAVA frame shown, how many milliseconds ago it arrived, and the
+48 bar heights) for measuring motion and frame pacing: a repeated or jumping
+sequence number is a repeated or skipped frame. It records nothing else.
 
 ## Status, disclaimer and how it's made
 

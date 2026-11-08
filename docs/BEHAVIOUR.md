@@ -23,7 +23,8 @@ it at once.
 
 The `cava` layout samples system audio through [CAVA](https://github.com/karlstav/cava)
 at 30 frames per second and uses the same fast-attack, slower-release smoothing
-as NIRUAMP. Only the spectrum rectangle is repainted between full clock frames,
+as NIRUAMP. Each CAVA frame is painted the moment it arrives, so every frame is
+shown exactly once. Only the spectrum rectangle is repainted between full clock frames,
 and CopyArea exposures are disabled. Bars are drawn from the active NIRUX
 theme's focus colour, with a lighter peak, so the spectrum follows every suite
 theme. Set `visualizer = false` to keep the cava composition without the
@@ -72,8 +73,8 @@ The spectrum only runs while it can be seen and has something to show:
   restart within a second of the display coming back. DPMS 1.2 servers report
   the change as an event; older ones are checked every 2 s and at once on
   input.
-- **Silence**: after 2 s with every bar below the noise floor the 30 fps
-  repaint stops after one flat frame, `playerctl` is stopped, and the first
+- **Silence**: after 2 s with every bar below the noise floor the
+  per-frame repaint stops after one flat frame, `playerctl` is stopped, and the first
   non-silent sample resumes it. CAVA's own `sleep_timer` pauses its output
   during the same silence. When sound returns the bars rise from the flat
   frame with the normal attack instead of jumping to the first sample, and

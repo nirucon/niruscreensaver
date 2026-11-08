@@ -12,6 +12,9 @@
 //! niruscreensaver --config      print the effective configuration
 //! ```
 
+// The verbatim twins also carry NIRULOCK's pause-music helpers (the stream
+// exclusions and the audio accessor), which the saver does not use.
+#[allow(dead_code)]
 mod audio;
 mod cava;
 mod config;
@@ -19,6 +22,7 @@ mod core;
 mod media;
 mod palette;
 mod quotes;
+#[allow(dead_code)]
 mod visual;
 
 /// One error type for the whole program, so `?` works with X11, IO and
@@ -405,7 +409,7 @@ fn draw_cava_frame(
 ///
 /// Wait for X input, the CAVA silence wake-up, the panel's detector/loader
 /// wake-up or the next visible clock/away/quote deadline, never a polling
-/// tick. The panel is repainted at 30 fps only while the display is on and
+/// tick. The panel is repainted with each CAVA frame only while the display is on and
 /// the spectrum has sound (see `cava::PowerGate`) or a fade runs.
 pub fn run(cfg: config::Config, coverage: core::Coverage) -> Result<()> {
     let mut surface = core::Surface::new("NIRUSCREENSAVER", coverage)?;
@@ -467,7 +471,6 @@ pub fn run(cfg: config::Config, coverage: core::Coverage) -> Result<()> {
     let mut fade = (!cfg.reduced_motion).then(Instant::now);
     let mut faded = cfg.clone();
     let mut next_full = Instant::now();
-    let mut next_frame = Instant::now();
     let mut pending: Option<Event> = None;
     loop {
         let root = surface.c.setup().roots[surface.screen_num].root;
@@ -573,21 +576,19 @@ pub fn run(cfg: config::Config, coverage: core::Coverage) -> Result<()> {
             if fade.is_some() {
                 next_full = next_full.min(now + FADE_STEP);
             }
-            next_frame = now + FRAME;
         } else if fade.is_none()
-            && ((now >= next_frame && visual.as_ref().is_some_and(visual::Visual::animating))
+            && (visual
+                .as_ref()
+                .and_then(visual::Visual::next_frame)
+                .is_some_and(|due| now >= due)
                 || panel_dirty)
         {
-            // The 30 fps panel path makes no X round trip: the idle time is
-            // only needed for the away text of a full frame. The frame that
-            // detects two seconds of silence is drawn flat and is the last.
+            // The panel path makes no X round trip: the idle time is only
+            // needed for the away text of a full frame. As in NIRULOCK, the
+            // spectrum is painted when CAVA delivers a frame, so each one is
+            // shown once. The frame that detects two seconds of silence is
+            // drawn flat and is the last.
             draw_cava_frame(&surface, &cfg, &mut visual)?;
-            // A steady cadence, as in NIRULOCK: the time spent drawing is not
-            // added to the interval, and a late frame restarts it.
-            next_frame += FRAME;
-            if next_frame <= Instant::now() {
-                next_frame = Instant::now() + FRAME;
-            }
         }
         if let Some(media) = media.as_mut() {
             // Starts or stops playerctl only when the spectrum starts or stops.
@@ -603,10 +604,10 @@ pub fn run(cfg: config::Config, coverage: core::Coverage) -> Result<()> {
             continue;
         }
         let mut deadline = next_full;
-        if visual.as_ref().is_some_and(visual::Visual::animating) {
-            deadline = deadline.min(next_frame);
-        }
+        // The next spectrum frame normally wakes the loop through its
+        // descriptor; this covers fades and a stalled CAVA.
         for due in [
+            visual.as_ref().and_then(visual::Visual::next_frame),
             power.as_ref().and_then(cava::DisplayPower::deadline),
             visual.as_ref().and_then(visual::Visual::deadline),
         ]
@@ -615,9 +616,11 @@ pub fn run(cfg: config::Config, coverage: core::Coverage) -> Result<()> {
         {
             deadline = deadline.min(due);
         }
+        // Rounded up: waking just before a deadline would spin.
         let timeout = deadline
             .saturating_duration_since(Instant::now())
-            .as_millis()
+            .as_micros()
+            .div_ceil(1000)
             .min(60_000) as i32;
         let [cava_wake, visual_wake] = visual
             .as_ref()
@@ -634,7 +637,6 @@ pub fn run(cfg: config::Config, coverage: core::Coverage) -> Result<()> {
             if let Some(visual) = visual.as_mut() {
                 visual.woke([ready[1], ready[2]]);
             }
-            next_frame = Instant::now();
         }
     }
 }
@@ -717,9 +719,6 @@ fn input_held(surface: &core::Surface) -> Result<bool> {
         | KeyButMask::BUTTON5;
     Ok(keys.iter().any(|byte| *byte != 0) || u16::from(pointer.mask) & u16::from(buttons) != 0)
 }
-
-/// One spectrum frame, the same 30 fps as CAVA produces.
-const FRAME: Duration = Duration::from_micros(33_333);
 
 /// True once the pointer is more than `MOTION_DISMISS_PX` from `origin`.
 fn moved_far(origin: (i16, i16), now: (i16, i16)) -> bool {

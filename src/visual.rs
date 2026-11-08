@@ -74,6 +74,8 @@ const QUOTE_OUT: Duration = Duration::from_millis(400);
 const QUOTE_IN: Duration = Duration::from_millis(700);
 const CAVA_OUT: Duration = Duration::from_millis(400);
 const CAVA_IN: Duration = Duration::from_millis(300);
+/// The frame interval of a fade.
+const FADE_FRAME: Duration = Duration::from_micros(33_333);
 
 /// What the panel shows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -367,6 +369,8 @@ pub struct Visual {
     /// A change that needs one repaint without a fade.
     repaint: bool,
     deck: Deck,
+    /// The last [`Visual::paint`], for the fade cadence.
+    painted: Instant,
 }
 
 impl Visual {
@@ -407,9 +411,15 @@ impl Visual {
             display_on: true,
             repaint: false,
             deck: Deck::new(seed()),
+            painted: now,
         };
         visual.tick(now);
         visual
+    }
+
+    /// The audio detector, when the panel runs one (`visual = "auto"`).
+    pub fn audio(&self) -> Option<&Audio> {
+        self.audio.as_ref()
     }
 
     /// True while the spectrum is live (sound, display on, not fading).
@@ -417,9 +427,19 @@ impl Visual {
         self.panel.shown() == Content::Cava && self.cava.as_ref().is_some_and(Cava::animating)
     }
 
-    /// True while the panel must be repainted at 30 fps.
-    pub fn animating(&self) -> bool {
-        self.display_on && (self.panel.fading() || self.cava_live())
+    /// When the panel needs its next repaint, while it animates at all: a
+    /// fade runs at 30 fps, the live spectrum paints each CAVA frame as it
+    /// arrives (see [`Cava::next_frame`]).
+    pub fn next_frame(&self) -> Option<Instant> {
+        if !self.display_on {
+            None
+        } else if self.panel.fading() {
+            Some(self.painted + FADE_FRAME)
+        } else if self.cava_live() {
+            self.cava.as_ref().map(Cava::next_frame)
+        } else {
+            None
+        }
     }
 
     /// The next moment [`Visual::tick`] has work without any input.
@@ -553,7 +573,8 @@ impl Visual {
         rect: (i16, i16, u16, u16),
     ) -> crate::Result<()> {
         let (x, y, w, h) = rect;
-        let level = self.panel.level(Instant::now());
+        self.painted = Instant::now();
+        let level = self.panel.level(self.painted);
         match self.panel.shown() {
             Content::Blank => quotes::fill(surface, pal.background, x, y, w, h),
             Content::Cava => {
