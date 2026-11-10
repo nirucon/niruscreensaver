@@ -23,7 +23,7 @@ NIRULOCK's job.
 - Five layouts: `cava` (default), `minimal`, `terminal`, `runic` and `corner`.
 - `visual = "auto"`: the CAVA spectrum only while music plays, otherwise a
   quote that changes every minute.
-- "Artist – Title" of the playing MPRIS track under the spectrum
+- Artist and title of the playing MPRIS track under the spectrum
   (`show_media`).
 - The dismissing key or click is swallowed, so it never reaches the window
   underneath; pointer motion does not dismiss unless you ask for it.
@@ -82,7 +82,8 @@ niruscreensaver --version
 `--preview` covers only the monitor with the focused window (else the one
 under the pointer, else the primary), so the other screens stay usable for
 comparison. `niructl screensaver` shows it from the session on every monitor, and `niruidle` starts it
-automatically after the idle timeout. Any key or click dismisses it.
+automatically after the idle timeout. Any key or click dismisses it. In NIRUX,
+`nirux manual screensaver` covers the idle ladder and every setting.
 
 ### Layouts
 
@@ -123,7 +124,7 @@ layout = "cava"                 # cava, minimal, terminal, runic, corner
 visualizer = true
 visual = "auto"                 # auto, cava, quotes, none
 quotes = ["*"]                  # collections by name; * and ? patterns
-show_media = true               # "Artist – Title" while music plays
+show_media = true               # artist and title while music plays
 font_size = 22.0
 clock_size = 88.0
 show_away_after_seconds = 60
