@@ -101,33 +101,109 @@ fn idle_via_extension(c: &x11rb::rust_connection::RustConnection, root: Window) 
     Some(u64::from(info.ms_since_user_input) / 1000)
 }
 
+/// One full frame: the layout on every monitor, then the panels.
 #[allow(clippy::too_many_arguments)]
 fn draw(
     surface: &mut core::Surface,
     cfg: &config::Config,
     text: &mut core::TextRenderer,
     big: &mut core::TextRenderer,
-    rune: Option<&mut core::TextRenderer>,
+    mut rune: Option<&mut core::TextRenderer>,
     hostname: &str,
     idle: u64,
     visual: Option<&mut visual::Visual>,
     media: Option<&str>,
     metrics: &Metrics,
 ) -> Result<()> {
+    surface.clear(cfg.palette.background)?;
+    let mut panels = Vec::new();
+    for area in surface.areas.clone() {
+        let panel = draw_area(
+            surface,
+            cfg,
+            text,
+            big,
+            rune.as_deref_mut(),
+            hostname,
+            idle,
+            media,
+            metrics,
+            area,
+        )?;
+        panels.extend(panel);
+    }
+    if let Some(visual) = visual {
+        paint_panels(surface, visual, &cfg.palette, &panels)?;
+    }
+    surface.present()?;
+    Ok(())
+}
+
+/// Paint the panel (spectrum or quote) into each rectangle. A rectangle of
+/// the same size as one already painted is copied from it: the screens show
+/// the same frame, and the panel is drawn once however many screens there are.
+fn paint_panels(
+    surface: &core::Surface,
+    visual: &mut visual::Visual,
+    pal: &palette::Palette,
+    rects: &[(i16, i16, u16, u16)],
+) -> Result<()> {
+    let mut painted: Vec<(i16, i16, u16, u16)> = Vec::new();
+    for &rect in rects {
+        if let Some(from) = painted
+            .iter()
+            .find(|p| (p.2, p.3) == (rect.2, rect.3))
+            .copied()
+        {
+            surface.c.copy_area(
+                surface.back,
+                surface.back,
+                surface.gc,
+                from.0,
+                from.1,
+                rect.0,
+                rect.1,
+                rect.2,
+                rect.3,
+            )?;
+        } else {
+            visual.paint(surface, pal, rect)?;
+            painted.push(rect);
+        }
+    }
+    Ok(())
+}
+
+/// The layout inside one monitor's area. Returns the panel's rectangle for
+/// the CAVA layout, which `paint_panels` fills.
+#[allow(clippy::too_many_arguments)]
+fn draw_area(
+    surface: &core::Surface,
+    cfg: &config::Config,
+    text: &mut core::TextRenderer,
+    big: &mut core::TextRenderer,
+    rune: Option<&mut core::TextRenderer>,
+    hostname: &str,
+    idle: u64,
+    media: Option<&str>,
+    metrics: &Metrics,
+    area: core::Area,
+) -> Result<Option<(i16, i16, u16, u16)>> {
     let pal = &cfg.palette;
-    surface.clear(pal.background)?;
-    let centre_x = (surface.width / 2) as i16;
+    let (ox, oy) = (i32::from(area.x), i32::from(area.y));
+    let centre_x = (ox + i32::from(area.width) / 2) as i16;
     let line = text.line_height();
     let big_line = big.line_height();
-    let width = i32::from(surface.width);
-    let height = i32::from(surface.height);
-    let left = |offset: i32| offset.clamp(i16::MIN as i32, i16::MAX as i32) as i16;
-    let top = |offset: i32| offset.clamp(i16::MIN as i32, i16::MAX as i32) as i16;
+    let width = i32::from(area.width);
+    let height = i32::from(area.height);
+    let left = |offset: i32| (ox + offset).clamp(i16::MIN as i32, i16::MAX as i32) as i16;
+    let top = |offset: i32| (oy + offset).clamp(i16::MIN as i32, i16::MAX as i32) as i16;
+    let mut panel = None;
     let show_away = idle >= u64::from(cfg.show_away_after_seconds);
     let away = core::away_text(idle);
     match cfg.layout {
         config::Layout::Minimal => {
-            let clock_baseline = (surface.height / 2) as i16 - line;
+            let clock_baseline = top(height / 2) - line;
             big.draw_centred(
                 &surface.c,
                 surface.gc,
@@ -205,7 +281,7 @@ fn draw(
             }
         }
         config::Layout::Runic => {
-            let clock_baseline = (surface.height / 2) as i16 - line;
+            let clock_baseline = top(height / 2) - line;
             if let Some(rune) = rune {
                 rune.draw_centred(
                     &surface.c,
@@ -300,7 +376,7 @@ fn draw(
             }
         }
         config::Layout::Cava => {
-            let stack = cava_stack(surface, metrics, !hostname.is_empty(), cfg.show_media);
+            let stack = stack_at(area, metrics, !hostname.is_empty(), cfg.show_media);
             let y = |v: i32| v.clamp(i16::MIN as i32, i16::MAX as i32) as i16;
             big.draw_centred(
                 &surface.c,
@@ -327,9 +403,7 @@ fn draw(
                     pal.background,
                 )?;
             }
-            if let Some(visual) = visual {
-                visual.paint(surface, pal, stack.rect)?;
-            }
+            panel = Some(stack.rect);
             // The track and the away time have fixed rows, so neither moves
             // when the other comes or goes.
             if let Some(media) = media {
@@ -361,8 +435,7 @@ fn draw(
             }
         }
     }
-    surface.present()?;
-    Ok(())
+    Ok(panel)
 }
 
 /// Shorten `value` with an ellipsis until it is at most `width` pixels wide.
@@ -485,14 +558,29 @@ fn stack_in(width: i32, height: i32, m: &Metrics, hostname: bool, media: bool) -
     }
 }
 
-fn cava_stack(surface: &core::Surface, m: &Metrics, hostname: bool, media: bool) -> Stack {
-    stack_in(
-        i32::from(surface.width),
-        i32::from(surface.height),
+/// The CAVA stack inside one monitor's area, in window coordinates.
+fn stack_at(area: core::Area, m: &Metrics, hostname: bool, media: bool) -> Stack {
+    let (ox, oy) = (i32::from(area.x), i32::from(area.y));
+    let s = stack_in(
+        i32::from(area.width),
+        i32::from(area.height),
         m,
         hostname,
         media,
-    )
+    );
+    let clamp = |v: i32| v.clamp(i16::MIN as i32, i16::MAX as i32) as i16;
+    Stack {
+        clock: oy + s.clock,
+        hostname: s.hostname.map(|b| oy + b),
+        rect: (
+            clamp(ox + i32::from(s.rect.0)),
+            clamp(oy + i32::from(s.rect.1)),
+            s.rect.2,
+            s.rect.3,
+        ),
+        media: oy + s.media,
+        away: oy + s.away,
+    }
 }
 
 /// Repaint only the CAVA panel (spectrum or quote) between full frames.
@@ -509,9 +597,15 @@ fn draw_cava_frame(
     let Some(visual) = visual.as_mut() else {
         return Ok(());
     };
-    let (x, y, width, height) = cava_stack(surface, metrics, hostname, cfg.show_media).rect;
-    visual.paint(surface, &cfg.palette, (x, y, width, height))?;
-    surface.present_rect(x, y, width, height)?;
+    let rects: Vec<_> = surface
+        .areas
+        .iter()
+        .map(|area| stack_at(*area, metrics, hostname, cfg.show_media).rect)
+        .collect();
+    paint_panels(surface, visual, &cfg.palette, &rects)?;
+    for (x, y, width, height) in rects {
+        surface.present_rect(x, y, width, height)?;
+    }
     Ok(())
 }
 
@@ -586,6 +680,7 @@ pub fn run(cfg: config::Config, coverage: core::Coverage) -> Result<()> {
     loop {
         let root = surface.c.setup().roots[surface.screen_num].root;
         let mut display_change = None;
+        let mut check_layout = false;
         // Drain x11rb's buffered events before blocking on its socket.
         while let Some(event) = match pending.take() {
             Some(event) => Some(event),
@@ -618,18 +713,23 @@ pub fn run(cfg: config::Config, coverage: core::Coverage) -> Result<()> {
                 }
                 Event::Expose(_) => next_full = Instant::now(),
                 // A resolution change or monitor hotplug changes the root
-                // geometry; the saver must not leave uncovered pixels.
-                // ConfigureNotify can also be a child window; resize()
-                // compares the actual root geometry and is cheap.
+                // geometry or the monitors; the saver must not leave uncovered
+                // pixels. Another window that is mapped, moved or restacked
+                // (the window manager raises its bars on every arrange) may now
+                // be above the saver. Both are checked once per batch of events.
                 Event::RandrScreenChangeNotify(_)
                 | Event::RandrNotify(_)
                 | Event::ConfigureNotify(_)
-                    if surface.resize()? =>
-                {
-                    next_full = Instant::now();
-                }
+                | Event::MapNotify(_)
+                | Event::CirculateNotify(_) => check_layout = true,
                 _ => {}
             }
+        }
+        if check_layout {
+            if surface.resize()? {
+                next_full = Instant::now();
+            }
+            surface.keep_on_top()?;
         }
         if let Some(on) = power
             .as_mut()

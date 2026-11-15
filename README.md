@@ -82,7 +82,9 @@ niruscreensaver --version
 `--preview` covers only the monitor with the focused window (else the one
 under the pointer, else the primary), so the other screens stay usable for
 comparison. `niructl screensaver` shows it from the session on every monitor, and `niruidle` starts it
-automatically after the idle timeout. Any key or click dismisses it. In NIRUX,
+automatically after the idle timeout. With several monitors the layout is
+drawn in the middle of each one, never across the seam between two, and the
+saver stays above the bars and every other window. Any key or click dismisses it. In NIRUX,
 `nirux manual screensaver` covers the idle ladder and every setting.
 
 ### Layouts

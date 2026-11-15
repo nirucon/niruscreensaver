@@ -409,6 +409,67 @@ fn monitors(c: &RustConnection, root: Window) -> Vec<Area> {
         .collect()
 }
 
+/// Where the saver draws its content inside a window at (`x`, `y`) of
+/// `width` x `height`: one area per monitor, in window coordinates, so the
+/// clock and the panel sit in the middle of every screen and never across the
+/// seam between two. A monitor inside another one (a mirrored, smaller
+/// output) adds nothing. Without monitors, or for a one-monitor preview, the
+/// whole window is the one area.
+pub fn content_areas(
+    monitors: &[Area],
+    coverage: Coverage,
+    (x, y, width, height): (i16, i16, u16, u16),
+) -> Vec<Area> {
+    let whole = Area {
+        x: 0,
+        y: 0,
+        width,
+        height,
+        primary: true,
+    };
+    if coverage == Coverage::One {
+        return vec![whole];
+    }
+    let (wx, wy) = (i32::from(x), i32::from(y));
+    let (ww, wh) = (i32::from(width), i32::from(height));
+    let mut clipped: Vec<Area> = monitors
+        .iter()
+        .filter_map(|m| {
+            let left = (i32::from(m.x) - wx).max(0);
+            let top = (i32::from(m.y) - wy).max(0);
+            let right = (i32::from(m.x) - wx + i32::from(m.width)).min(ww);
+            let bottom = (i32::from(m.y) - wy + i32::from(m.height)).min(wh);
+            (right > left && bottom > top).then(|| Area {
+                x: left as i16,
+                y: top as i16,
+                width: (right - left) as u16,
+                height: (bottom - top) as u16,
+                primary: m.primary,
+            })
+        })
+        .collect();
+    let inside = |a: &Area, b: &Area| {
+        a.x >= b.x
+            && a.y >= b.y
+            && i32::from(a.x) + i32::from(a.width) <= i32::from(b.x) + i32::from(b.width)
+            && i32::from(a.y) + i32::from(a.height) <= i32::from(b.y) + i32::from(b.height)
+    };
+    let mut areas: Vec<Area> = Vec::new();
+    // Largest first, so a mirrored smaller output falls inside the larger one.
+    clipped.sort_by_key(|a| std::cmp::Reverse(u32::from(a.width) * u32::from(a.height)));
+    for a in clipped {
+        if !areas.iter().any(|b| inside(&a, b)) {
+            areas.push(a);
+        }
+    }
+    // Reading order: top to bottom, then left to right.
+    areas.sort_by_key(|a| (a.y, a.x));
+    if areas.is_empty() {
+        areas.push(whole);
+    }
+    areas
+}
+
 /// Centre of the window manager's active window, in root coordinates.
 fn focus_centre(c: &RustConnection, root: Window) -> Option<(i16, i16)> {
     let atom = |name: &[u8]| Some(c.intern_atom(false, name).ok()?.reply().ok()?.atom);
@@ -468,6 +529,8 @@ pub struct Surface {
     pub height: u16,
     pub depth: u8,
     pub win: Window,
+    /// Where content is drawn: one area per monitor, in window coordinates.
+    pub areas: Vec<Area>,
     pub gc: Gcontext,
     /// Off-screen copy: every frame is composed here and copied once, so the
     /// screen never shows a half-drawn frame.
@@ -540,6 +603,14 @@ impl Surface {
             format!("{name}\0{name}\0").as_bytes(),
         )?;
         c.map_window(win)?;
+        // Stacking changes of other windows: the window manager raises its
+        // bars above everything on each arrange, override-redirect windows
+        // included, and a screensaver with the bars on top of it is not one.
+        c.change_window_attributes(
+            screen.root,
+            &ChangeWindowAttributesAux::new().event_mask(EventMask::SUBSTRUCTURE_NOTIFY),
+        )?;
+        let areas = content_areas(&monitors(&c, screen.root), coverage, (x, y, width, height));
         c.randr_select_input(
             screen.root,
             x11rb::protocol::randr::NotifyMask::SCREEN_CHANGE
@@ -601,9 +672,27 @@ impl Surface {
             height,
             depth,
             win,
+            areas,
             gc,
             back,
         })
+    }
+
+    /// Raise the saver above every other window when something went over it.
+    ///
+    /// Only restacks when it is not already the top child: restacking in
+    /// answer to its own ConfigureNotify would otherwise feed itself.
+    pub fn keep_on_top(&self) -> crate::Result<()> {
+        let root = self.c.setup().roots[self.screen_num].root;
+        let children = self.c.query_tree(root)?.reply()?.children;
+        if children.last() != Some(&self.win) {
+            self.c.configure_window(
+                self.win,
+                &ConfigureWindowAux::new().stack_mode(StackMode::ABOVE),
+            )?;
+            self.c.flush()?;
+        }
+        Ok(())
     }
 
     /// Fill the backing pixmap with a solid colour.
@@ -624,6 +713,7 @@ impl Surface {
     }
 
     /// Follow a root resize or output change and keep full-screen coverage.
+    /// Returns true when the window or the per-monitor areas changed.
     ///
     /// The window and backing pixmap are resized atomically as seen by the
     /// user: one configure request, then a fresh pixmap and a full redraw.
@@ -641,9 +731,20 @@ impl Surface {
             let a = target_area(&self.c, &screen, self.coverage);
             (a.x, a.y, a.width, a.height)
         };
+        let areas = content_areas(
+            &monitors(&self.c, root),
+            self.coverage,
+            (x, y, width, height),
+        );
         if (x, y, width, height) == (self.x, self.y, self.width, self.height) {
-            return Ok(false);
+            // Same window, but the monitors may have moved inside it.
+            if areas == self.areas {
+                return Ok(false);
+            }
+            self.areas = areas;
+            return Ok(true);
         }
+        self.areas = areas;
         self.c.configure_window(
             self.win,
             &ConfigureWindowAux::new()
@@ -823,6 +924,48 @@ mod tests {
         ];
         assert_eq!(choose_area(&no_primary, None, None), Some(upper));
         assert_eq!(choose_area(&[], Some((0, 0)), None), None);
+    }
+
+    #[test]
+    fn content_sits_on_every_monitor_not_across_the_seam() {
+        let a = |x: i16, y: i16, width: u16, height: u16| Area {
+            x,
+            y,
+            width,
+            height,
+            primary: false,
+        };
+        // Two screens stacked (othala): one area each, top first.
+        let stacked = [a(0, 1440, 2560, 1440), a(0, 0, 2560, 1440)];
+        assert_eq!(
+            content_areas(&stacked, Coverage::All, (0, 0, 2560, 2880)),
+            vec![a(0, 0, 2560, 1440), a(0, 1440, 2560, 1440)]
+        );
+        // Side by side with different sizes.
+        let side = [a(1920, 0, 2560, 1440), a(0, 360, 1920, 1080)];
+        assert_eq!(
+            content_areas(&side, Coverage::All, (0, 0, 4480, 1440)),
+            vec![a(1920, 0, 2560, 1440), a(0, 360, 1920, 1080)]
+        );
+        // A mirrored smaller output adds nothing.
+        let mirrored = [a(0, 0, 1920, 1080), a(0, 0, 2560, 1440)];
+        assert_eq!(
+            content_areas(&mirrored, Coverage::All, (0, 0, 2560, 1440)),
+            vec![a(0, 0, 2560, 1440)]
+        );
+        // No monitors, or a preview: the whole window.
+        let whole = Area {
+            primary: true,
+            ..a(0, 0, 800, 600)
+        };
+        assert_eq!(
+            content_areas(&[], Coverage::All, (0, 0, 800, 600)),
+            vec![whole]
+        );
+        assert_eq!(
+            content_areas(&stacked, Coverage::One, (0, 1440, 800, 600)),
+            vec![whole]
+        );
     }
 
     #[test]
