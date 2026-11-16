@@ -1,6 +1,6 @@
 [package]
 name = "niruscreensaver"
-version = "0.15.0"
+version = "0.16.0"
 edition = "2021"
 rust-version = "1.75"
 license = "MIT"
@@ -11,6 +11,9 @@ repository = "https://github.com/nirucon/niruscreensaver"
 x11rb = { version = "0.13", features = ["screensaver", "randr", "dpms"] }
 serde = { version = "1", features = ["derive"] }
 toml = "0.8"
+toml_edit = { version = "0.22", default-features = false, features = ["parse", "display"] }
+png = "0.17"
+jpeg-decoder = { version = "0.3", default-features = false }
 indexmap = "=2.7.1"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 ab_glyph = "0.2"

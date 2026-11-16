@@ -44,8 +44,74 @@ impl Layout {
     }
 }
 
+/// What the screensaver shows. `clock` is the classic composition with its
+/// five layouts; the others are separate scenes in `crate::scenes`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Scene {
+    Clock,
+    Photos,
+    Dark,
+    DarkSid,
+    Shuffle,
+}
+
+impl Scene {
+    /// Every scene, in the order the picker lists them.
+    pub const ALL: [Scene; 5] = [
+        Scene::Clock,
+        Scene::Photos,
+        Scene::Dark,
+        Scene::DarkSid,
+        Scene::Shuffle,
+    ];
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().replace('_', "-").as_str() {
+            "clock" => Some(Self::Clock),
+            "photos" => Some(Self::Photos),
+            "dark" => Some(Self::Dark),
+            "dark-sid" => Some(Self::DarkSid),
+            "shuffle" => Some(Self::Shuffle),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Clock => "clock",
+            Self::Photos => "photos",
+            Self::Dark => "dark",
+            Self::DarkSid => "dark-sid",
+            Self::Shuffle => "shuffle",
+        }
+    }
+
+    pub fn description(self) -> &'static str {
+        match self {
+            Self::Clock => "Large clock with the spectrum or a quote (five layouts)",
+            Self::Photos => "Slide show with a slow drift and a small clock",
+            Self::Dark => "Black, only the NIRUX line gliding across each screen",
+            Self::DarkSid => "As dark, with C64 SID tunes when nothing else plays",
+            Self::Shuffle => "Another scene from the shuffle list every time",
+        }
+    }
+}
+
+/// The default `shuffle` list.
+pub const DEFAULT_SHUFFLE: [Scene; 3] = [Scene::Clock, Scene::Photos, Scene::Dark];
+/// The default slide show folder (NIRUX installs the theme wallpapers there).
+pub const DEFAULT_PHOTOS_FOLDER: &str = "~/Pictures/Wallpapers/NIRU";
+
 #[derive(Clone, Debug)]
 pub struct Config {
+    /// What is shown: see [`Scene`].
+    pub scene: Scene,
+    /// The scenes `shuffle` picks from.
+    pub shuffle: Vec<Scene>,
+    /// The `photos` folder, as written (`~/` allowed).
+    pub photos_folder: String,
+    /// Seconds each photo stays.
+    pub photos_seconds: u32,
     pub font_path: Option<String>,
     pub rune_font_path: Option<String>,
     pub font_size: f32,
@@ -256,6 +322,10 @@ fn suite_palette() -> Option<palette::Palette> {
 impl Default for Config {
     fn default() -> Self {
         Self {
+            scene: Scene::Clock,
+            shuffle: DEFAULT_SHUFFLE.to_vec(),
+            photos_folder: DEFAULT_PHOTOS_FOLDER.to_string(),
+            photos_seconds: 20,
             font_path: None,
             rune_font_path: None,
             font_size: 22.0,
@@ -278,7 +348,27 @@ impl Default for Config {
     }
 }
 
-fn config_file() -> std::path::PathBuf {
+/// `clock, photos, dark, dark-sid or shuffle`
+fn scene_names() -> String {
+    let names: Vec<&str> = Scene::ALL.iter().map(|s| s.as_str()).collect();
+    let (last, rest) = names.split_last().expect("scenes");
+    format!("{} or {last}", rest.join(", "))
+}
+
+/// `~/` expanded against `$HOME`.
+pub fn expand_home(path: &str) -> std::path::PathBuf {
+    match path.strip_prefix("~/") {
+        Some(rest) => {
+            std::path::PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(rest)
+        }
+        None if path == "~" => {
+            std::path::PathBuf::from(std::env::var_os("HOME").unwrap_or_default())
+        }
+        None => std::path::PathBuf::from(path),
+    }
+}
+
+pub fn config_file() -> std::path::PathBuf {
     let base = std::env::var_os("XDG_CONFIG_HOME")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| {
@@ -310,6 +400,12 @@ impl Config {
         Self::from_value_with(v, None)
     }
 
+    /// Check a whole settings file as it would be loaded.
+    pub fn check_text(text: &str) -> Result<Self> {
+        let value: toml::Value = text.parse().map_err(|e| format!("{e}"))?;
+        Self::from_value_with(&value, None)
+    }
+
     fn from_value_with(v: &toml::Value, suite: Option<palette::Palette>) -> Result<Self> {
         let mut cfg = Self::default();
         if let Some(suite) = suite {
@@ -317,6 +413,48 @@ impl Config {
         }
         if let Some(t) = v.get("font_path").and_then(|x| x.as_str()) {
             cfg.font_path = Some(t.to_string());
+        }
+        if let Some(scene) = v.get("scene") {
+            cfg.scene = scene
+                .as_str()
+                .and_then(Scene::parse)
+                .ok_or_else(|| format!("scene must be {}", scene_names()))?;
+        }
+        if let Some(list) = v.get("shuffle") {
+            let items = list
+                .as_array()
+                .ok_or("shuffle must be a list of scenes")?
+                .iter()
+                .map(|x| {
+                    x.as_str()
+                        .and_then(Scene::parse)
+                        .filter(|s| *s != Scene::Shuffle)
+                        .ok_or_else(|| "shuffle lists clock, photos, dark or dark-sid".to_string())
+                })
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+            let mut unique = Vec::new();
+            for scene in items {
+                if !unique.contains(&scene) {
+                    unique.push(scene);
+                }
+            }
+            if unique.is_empty() {
+                return Err("shuffle needs at least one scene".into());
+            }
+            cfg.shuffle = unique;
+        }
+        if let Some(folder) = v.get("photos_folder") {
+            cfg.photos_folder = folder
+                .as_str()
+                .filter(|f| !f.trim().is_empty())
+                .ok_or("photos_folder must be a path")?
+                .to_string();
+        }
+        if let Some(n) = v.get("photos_seconds") {
+            cfg.photos_seconds = n
+                .as_integer()
+                .filter(|n| (5..=3600).contains(n))
+                .ok_or("photos_seconds must be 5 to 3600")? as u32;
         }
         if let Some(n) = v.get("font_size").and_then(|x| x.as_float()) {
             cfg.font_size = n as f32;
@@ -419,7 +557,7 @@ impl Config {
 
     pub fn describe(&self) -> String {
         format!(
-            "config: {}\nidle after: {} min\nlock {} min later\ndisplay off: {} min after locking\nlegacy lock_timeout_minutes: {} (ignored)\naway text after: {} s\nclock size: {}\nfont: {}\nlayout: {}\nvisualizer: {}\nvisual: {}\nquotes: {}\nrune font: {}\ndismiss on motion: {}\nshow media: {}\nreduced motion: {}\nshow hostname: {}",
+            "config: {}\nidle after: {} min\nlock {} min later\ndisplay off: {} min after locking\nlegacy lock_timeout_minutes: {} (ignored)\naway text after: {} s\nclock size: {}\nfont: {}\nlayout: {}\nvisualizer: {}\nvisual: {}\nquotes: {}\nrune font: {}\ndismiss on motion: {}\nshow media: {}\nreduced motion: {}\nshow hostname: {}\nscene: {}\nshuffle: {}\nphotos folder: {}\nphotos seconds: {}",
             config_file().display(),
             self.idle_minutes,
             self.lock_after_minutes,
@@ -441,6 +579,14 @@ impl Config {
             if self.show_media { "on" } else { "off" },
             if self.reduced_motion { "on" } else { "off" },
             if self.show_hostname { "on" } else { "off" },
+            self.scene.as_str(),
+            self.shuffle
+                .iter()
+                .map(|s| s.as_str())
+                .collect::<Vec<_>>()
+                .join(", "),
+            self.photos_folder,
+            self.photos_seconds,
         )
     }
 }
@@ -448,6 +594,30 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn scenes_parse_and_shuffle_is_checked() {
+        let c = Config::check_text("").unwrap();
+        assert_eq!(c.scene, Scene::Clock);
+        assert_eq!(c.shuffle, DEFAULT_SHUFFLE.to_vec());
+        let c =
+            Config::check_text("scene = \"DARK_SID\"\nshuffle = [\"dark\", \"dark\", \"photos\"]")
+                .unwrap();
+        assert_eq!(c.scene, Scene::DarkSid);
+        assert_eq!(c.shuffle, vec![Scene::Dark, Scene::Photos]);
+        for bad in [
+            "scene = \"aurora\"",
+            "shuffle = []",
+            "shuffle = [\"shuffle\"]",
+            "photos_seconds = 2",
+            "photos_folder = \"\"",
+        ] {
+            assert!(Config::check_text(bad).is_err(), "{bad}");
+        }
+        for scene in Scene::ALL {
+            assert_eq!(Scene::parse(scene.as_str()), Some(scene));
+        }
+    }
 
     #[test]
     fn defaults_match_the_request() {

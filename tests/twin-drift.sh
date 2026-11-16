@@ -9,7 +9,7 @@ TEST=$(mktemp -d)
 trap 'rm -rf "$TEST"' EXIT
 status=0
 COLLECTIONS="havamal-en havamal-sv stoic-en stoic-sv"
-files="src/cava.rs src/palette.rs src/audio.rs src/visual.rs src/quotes.rs"
+files="src/cava.rs src/palette.rs src/audio.rs src/visual.rs src/quotes.rs src/sid.rs src/music.rs src/reason.rs"
 for name in $COLLECTIONS; do files="$files quotes/$name.txt"; done
 files="$files quotes/SOURCES.md"
 for file in $files; do

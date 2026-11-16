@@ -1,6 +1,6 @@
 # NIRUSCREENSAVER
 
-Small X11 idle screen with date, clock, away time and a themed CAVA spectrum or quotes.
+Small X11 idle screen: a clock with a themed CAVA spectrum or quotes, a photo slide show, or a dark screen with an optional C64 SID soundtrack.
 
 **Status: beta** · Part of the [NIRUX](https://github.com/nirucon/nirux) suite · [MIT License](LICENSE)
 
@@ -20,7 +20,10 @@ NIRULOCK's job.
 
 ## Features
 
-- Five layouts: `cava` (default), `minimal`, `terminal`, `runic` and `corner`.
+- Five scenes: `clock` (default), `photos`, `dark`, `dark-sid` and
+  `shuffle`, chosen in `screensaver.toml`, with `niruscreensaver --set scene
+  NAME` or in the launcher (NIRUX Settings, then Screensaver).
+- Five clock layouts: `cava` (default), `minimal`, `terminal`, `runic` and `corner`.
 - `visual = "auto"`: the CAVA spectrum only while music plays, otherwise a
   quote that changes every minute.
 - Artist and title of the playing MPRIS track under the spectrum
@@ -31,13 +34,14 @@ NIRULOCK's job.
   `reduced_motion`) and full coverage across output changes.
 - Power-aware: with the display off or in silence, CAVA, `playerctl` and the
   spectrum repaint stop completely.
-- Shares its CAVA, audio-detection, quote code and quote collections verbatim
-  with NIRULOCK.
+- Shares its CAVA, audio-detection, SID player, quote code and quote
+  collections verbatim with NIRULOCK.
 
 ## Requirements
 
 - Debian, Arch or Void Linux (glibc), x86_64, with X11.
 - Optional: [CAVA](https://github.com/karlstav/cava) for the spectrum,
+  `sidplayfp` for `dark-sid` (Debian and Void `sidplayfp`, Arch from the AUR),
   PipeWire (`pipewire-pulse`) or PulseAudio for music detection, `playerctl`
   for the track line, a runic font for the `runic` layout.
 - Building from source: Rust 1.75 or newer, a C linker, fontconfig and a
@@ -75,7 +79,12 @@ NIRUX-owned binaries are maintained with `nirux update`.
 ```sh
 niruscreensaver             # show it now, on every monitor
 niruscreensaver --preview   # preview it on one monitor (focused, else primary)
+niruscreensaver --preview dark   # preview a scene without choosing it
 niruscreensaver --config    # print the effective settings
+niruscreensaver --list      # the scenes, the chosen one and the shuffle list
+niruscreensaver --settings  # the settings the launcher's Screensaver view shows
+niruscreensaver --set scene photos         # change one setting, comments kept
+niruscreensaver --shuffle toggle dark-sid  # add or remove a scene from shuffle
 niruscreensaver --version
 ```
 
@@ -87,7 +96,37 @@ drawn in the middle of each one, never across the seam between two, and the
 saver stays above the bars and every other window. Any key or click dismisses it. In NIRUX,
 `nirux manual screensaver` covers the idle ladder and every setting.
 
-### Layouts
+### Scenes
+
+| Scene | Shows |
+|---|---|
+| `clock` | Default. The clock in one of the layouts below, with the spectrum or a quote |
+| `photos` | The pictures in `photos_folder` (default `~/Pictures/Wallpapers/NIRU`, the NIRUX wallpapers), each for `photos_seconds`, drifting slowly and crossfading, with a small clock on a soft shade in the corner |
+| `dark` | Black, with only the line "NIRUX - A MINIMAL X11 DESKTOP" gliding slowly across each screen and bouncing off its edges, so no pixel stays lit |
+| `dark-sid` | As `dark`, with C64 SID tunes and the tune's title, composer and year under the line |
+| `shuffle` | One of the scenes in `shuffle` (default `clock`, `photos` and `dark`), a new pick every time |
+
+`photos` reads PNG and JPEG files two folder levels deep. When a picture
+exists as `-4k` and `-8k` (the NIRUX wallpaper sets), the 4K one is used;
+large JPEGs are decoded at a reduced size. Without any pictures the clock is
+shown instead.
+
+`dark-sid` plays exactly like NIRULOCK's pause music and shares its player:
+`sidplayfp` plays the `.sid` files in the folder from NIRULOCK's
+`[pause_music]` (default `~/Music/SID`, set in `~/.config/niruui/lock.toml`),
+in natural order, and only if nothing else played during the first
+2 seconds. Choosing `dark-sid` is the choice to play, so it also plays when
+`niruidle` starts the saver; NIRULOCK's `enabled` and `on` do not apply. The
+music stops when the display goes off, when a key or click ends the saver,
+and when the lock takes over (`niruidle` ends the saver, and the player ends
+with it). Without `sidplayfp` or tunes it stays silent.
+
+With several monitors every scene draws on each one: the slide show scales
+the picture for each screen, and the dark line glides on every screen on its
+own path. `reduced_motion = true` stops the drift and crossfade and moves
+the dark line once a minute instead.
+
+### Clock layouts
 
 | Layout | Composition |
 |---|---|
@@ -122,6 +161,10 @@ Settings live in `~/.config/niruui/screensaver.toml` (XDG respected); see
 in `~/.config/niruwm/config.toml`; `[palette]` overrides affect content only.
 
 ```toml
+scene = "clock"                 # clock, photos, dark, dark-sid, shuffle
+shuffle = ["clock", "photos", "dark"]
+photos_folder = "~/Pictures/Wallpapers/NIRU"
+photos_seconds = 20             # 5 to 3600
 layout = "cava"                 # cava, minimal, terminal, runic, corner
 visualizer = true
 visual = "auto"                 # auto, cava, quotes, none
@@ -159,6 +202,11 @@ only used when the shared file sets no `[idle]` values.
   `_NET_WM_WINDOW_OPACITY`; the window class is `NIRUSCREENSAVER`.
 - **No spectrum.** CAVA is not installed, `visual` is `quotes` or `none`, or
   (with `auto`) nothing is playing loud enough.
+- **No music with `dark-sid`.** `sidplayfp` must be installed and the folder
+  (NIRULOCK's `[pause_music] folder`, default `~/Music/SID`) must hold `.sid`
+  files; other audio playing as the saver starts keeps it silent.
+- **`photos` shows the clock.** `photos_folder` has no PNG or JPEG pictures;
+  the saver says so on standard error.
 - **The saver exits at once.** The keyboard or pointer grab failed (another
   program holds it); it exits non-zero rather than pretend.
 - **Display power debugging.** `NIRUSCREENSAVER_TRACE=1` logs how the display
@@ -184,7 +232,8 @@ sh tests/installer.sh
 sh tests/twin-drift.sh                                      # needs network
 ```
 
-`tests/twin-drift.sh` checks that the code and quote files shared with
+`tests/twin-drift.sh` checks that the code (including the SID player used by
+`dark-sid`) and quote files shared with
 NIRULOCK match the tag in `tests/nirulock-tag`.
 `NIRU_CAVA_TRACE=/path/to/file` appends one line per spectrum frame (the
 milliseconds since start, `L`ive, `S`ilent or display `O`ff, the sequence

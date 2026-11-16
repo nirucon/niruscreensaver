@@ -10,6 +10,8 @@
 //! niruscreensaver               show it now, on every monitor
 //! niruscreensaver --preview     preview it on the focused monitor
 //! niruscreensaver --config      print the effective configuration
+//! niruscreensaver --list        the scenes, which one is chosen
+//! niruscreensaver --set K V     change a setting in screensaver.toml
 //! ```
 
 // The verbatim twins also carry NIRULOCK's pause-music helpers (the stream
@@ -19,9 +21,20 @@ mod audio;
 mod cava;
 mod config;
 mod core;
+mod editor;
+mod images;
 mod media;
+// Verbatim NIRULOCK twins for `dark-sid`: the pause-music player, the SID
+// header and song lengths, and the lock reasons its settings parse.
+#[allow(dead_code)]
+mod music;
 mod palette;
 mod quotes;
+#[allow(dead_code)]
+mod reason;
+mod scenes;
+#[allow(dead_code)]
+mod sid;
 #[allow(dead_code)]
 mod visual;
 
@@ -977,6 +990,31 @@ fn prompt_line(hostname: &str, word: &str) -> String {
     }
 }
 
+/// Show the chosen scene. `shuffle` picks one; `photos` without pictures
+/// shows the clock.
+fn show(cfg: config::Config, coverage: core::Coverage) -> Result<()> {
+    let scene = match cfg.scene {
+        config::Scene::Shuffle => scenes::pick(&cfg.shuffle, scenes::random()),
+        scene => scene,
+    };
+    match scene {
+        config::Scene::Clock => run(cfg, coverage),
+        config::Scene::Photos => {
+            let pictures = scenes::photos(&cfg);
+            if pictures.is_empty() {
+                eprintln!(
+                    "niruscreensaver: no PNG or JPEG pictures in {}; showing the clock",
+                    cfg.photos_folder
+                );
+                run(cfg, coverage)
+            } else {
+                scenes::run(cfg, coverage, scene, pictures)
+            }
+        }
+        scene => scenes::run(cfg, coverage, scene, Vec::new()),
+    }
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let arg = args.first().map(String::as_str).unwrap_or("");
@@ -991,16 +1029,32 @@ fn main() {
                 std::process::exit(1)
             }
         },
+        "--list" | "--settings" | "--set" | "--shuffle" => {
+            if let Err(e) = editor::run(&args) {
+                eprintln!("niruscreensaver: {e}");
+                std::process::exit(2)
+            }
+        }
         // No argument is the screensaver itself, over every monitor;
-        // --preview shows it on the focused (or primary) monitor only.
+        // --preview shows it on the focused (or primary) monitor only, and
+        // --preview SCENE shows that scene without changing the setting.
         "--preview" | "" => match config::Config::load() {
-            Ok(cfg) => {
+            Ok(mut cfg) => {
                 let coverage = if arg == "--preview" {
                     core::Coverage::One
                 } else {
                     core::Coverage::All
                 };
-                if let Err(e) = run(cfg, coverage) {
+                if let Some(name) = args.get(1).filter(|_| arg == "--preview") {
+                    match config::Scene::parse(name) {
+                        Some(scene) => cfg.scene = scene,
+                        None => {
+                            eprintln!("niruscreensaver: {name:?} is not a scene");
+                            std::process::exit(2)
+                        }
+                    }
+                }
+                if let Err(e) = show(cfg, coverage) {
                     eprintln!("niruscreensaver: {e}");
                     std::process::exit(1)
                 }
@@ -1011,7 +1065,10 @@ fn main() {
             }
         },
         _ => {
-            eprintln!("Usage: niruscreensaver [--version|--config|--preview]");
+            eprintln!(
+                "Usage: niruscreensaver [--version|--config|--preview [SCENE]]\n{}",
+                editor::USAGE
+            );
             std::process::exit(2)
         }
     }

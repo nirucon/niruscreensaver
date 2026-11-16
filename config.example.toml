@@ -1,4 +1,24 @@
 # ~/.config/niruui/screensaver.toml; every setting is optional.
+# Change it here or with `niruscreensaver --set KEY VALUE` (comments are
+# kept), or in the launcher: NIRUX Settings > Screensaver.
+
+# What is shown:
+#   "clock"     the clock with the spectrum or a quote (the layouts below)
+#   "photos"    a slide show from photos_folder, slow drift and crossfade,
+#               with a small clock; without pictures the clock is shown
+#   "dark"      black, only "NIRUX - A MINIMAL X11 DESKTOP" gliding across
+#               each screen
+#   "dark-sid"  as dark, with C64 SID tunes (sidplayfp, the folder from
+#               NIRULOCK's [pause_music], default ~/Music/SID) while nothing
+#               else plays
+#   "shuffle"   one of the scenes in `shuffle`, a new pick every time
+scene = "clock"
+shuffle = ["clock", "photos", "dark"]
+# PNG and JPEG pictures, two folder levels deep. A -4k file wins over the
+# same -8k file (the NIRUX wallpaper sets).
+photos_folder = "~/Pictures/Wallpapers/NIRU"
+photos_seconds = 20
+
 # font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf"
 font_size = 22.0
 clock_size = 88.0
@@ -39,7 +59,8 @@ show_away_after_seconds = 60
 # moved more than 24 px since the screen appeared.
 dismiss_on_motion = false
 
-# The screen fades in from black over 300 ms; true shows it at once.
+# The screen fades in from black over 300 ms; true shows it at once, stops
+# the photo drift and crossfade, and moves the dark line once a minute.
 reduced_motion = false
 
 # Show the machine's hostname under the clock. Off by default, so a screen in

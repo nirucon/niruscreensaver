@@ -142,6 +142,55 @@ impl TextRenderer {
         total.ceil().clamp(0.0, f32::from(i16::MAX)) as i16
     }
 
+    /// Whether the font has a glyph for `ch`.
+    pub fn has_glyph(&self, ch: char) -> bool {
+        self.font.glyph_id(ch).0 != 0
+    }
+
+    /// Blend `text` in `fg` into a `0xRRGGBB` buffer `width` pixels wide,
+    /// pen starting at `left`, baseline at `baseline`. For text over a
+    /// picture, where there is no single background colour to blend against.
+    pub fn composite(
+        &mut self,
+        buf: &mut [u32],
+        width: usize,
+        left: i32,
+        baseline: i32,
+        text: &str,
+        fg: u32,
+    ) {
+        if width == 0 {
+            return;
+        }
+        let height = buf.len() / width;
+        let (fr, fgc, fb) = split(fg);
+        for (ch, pen) in self.pens(text) {
+            let mask = self.mask(ch);
+            let x0 = left + pen + i32::from(mask.x);
+            let y0 = baseline + i32::from(mask.y);
+            for my in 0..usize::from(mask.height) {
+                let y = y0 + my as i32;
+                if y < 0 || y as usize >= height {
+                    continue;
+                }
+                for mx in 0..usize::from(mask.width) {
+                    let x = x0 + mx as i32;
+                    if x < 0 || x as usize >= width {
+                        continue;
+                    }
+                    let a = u32::from(mask.coverage[my * usize::from(mask.width) + mx]);
+                    if a == 0 {
+                        continue;
+                    }
+                    let at = y as usize * width + x as usize;
+                    let (br, bgc, bb) = split(buf[at]);
+                    let mix = |f: u32, b: u32| ((f * a + b * (255 - a)) / 255) & 255;
+                    buf[at] = (mix(fr, br) << 16) | (mix(fgc, bgc) << 8) | mix(fb, bb);
+                }
+            }
+        }
+    }
+
     /// The inked box of `text` drawn from pen 0 on baseline 0:
     /// `(left, top, right, bottom)` in pixels, top negative above the
     /// baseline. `None` for text without ink (empty or only spaces).
