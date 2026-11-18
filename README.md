@@ -104,7 +104,7 @@ saver stays above the bars and every other window. Any key or click dismisses it
 | `photos` | The pictures in `photos_folder` (default `~/Pictures/Wallpapers/NIRU`, the NIRUX wallpapers), each for `photos_seconds`, drifting slowly and crossfading, with a small clock on a soft shade in the corner |
 | `dark` | Black, with only the line "NIRUX - A MINIMAL X11 DESKTOP" gliding slowly across each screen and bouncing off its edges, so no pixel stays lit |
 | `dark-sid` | As `dark`, with C64 SID tunes and the tune's title, composer and year under the line |
-| `ascii` | "NIRUX ascii": black, with a large NIRUX banner in ASCII and "A MINIMAL X11 DESKTOP" under it, typed out one character at a time behind a block cursor that blinks once a second when the text is done. After a minute it is erased backwards and typed again somewhere else on each screen |
+| `ascii` | "NIRUX ascii": black, with a large NIRUX banner in ASCII and "A MINIMAL X11 DESKTOP" under it, centred and sized for each screen. The banner takes the theme's accent colour (the text colour when the accent is too dark to read on black). It is typed out one character at a time behind a block cursor that blinks once a second when the text is done; after a minute it is erased backwards, the screen stays black for a few seconds, and it is typed again, shifted a little from the centre |
 | `ascii-sid` | As `ascii`, with C64 SID tunes like `dark-sid` and the tune under the text |
 | `shuffle` | One of the scenes in `shuffle` (default `clock`, `photos` and `dark`), a new pick every time |
 
@@ -125,10 +125,10 @@ with it). Without `sidplayfp` or tunes it stays silent.
 
 With several monitors every scene draws on each one: the slide show scales
 the picture for each screen, and the dark line glides on every screen on its
-own path; `ascii` types the same text on every screen, each in its own
-place. `reduced_motion = true` stops the drift and crossfade and moves
+own path; `ascii` types the same text centred on every screen, sized for
+each one. `reduced_motion = true` stops the drift and crossfade and moves
 the dark line once a minute instead; `ascii` then shows the whole text at
-once, with a still cursor, in a new place every minute.
+once, with a still cursor, shifted a little every minute.
 
 ### Clock layouts
 

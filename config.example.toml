@@ -12,8 +12,9 @@
 #               NIRULOCK's [pause_music], default ~/Music/SID) while nothing
 #               else plays
 #   "ascii"     "NIRUX ascii": a large NIRUX banner in ASCII with "A MINIMAL
-#               X11 DESKTOP" under it, typed out behind a blinking cursor,
-#               erased and typed again elsewhere every minute
+#               X11 DESKTOP" under it, centred on every screen in the
+#               theme's accent colour, typed out behind a blinking cursor,
+#               erased and typed again every minute after a short pause
 #   "ascii-sid" as ascii, with C64 SID tunes like dark-sid
 #   "shuffle"   one of the scenes in `shuffle`, a new pick every time
 scene = "clock"

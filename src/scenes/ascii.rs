@@ -1,14 +1,17 @@
 //! `ascii` and `ascii-sid` ("NIRUX ascii"): black, with a large NIRUX banner
-//! in ASCII and "A MINIMAL X11 DESKTOP" under it, typed out one character at
-//! a time like an old terminal, with a block cursor that blinks once a second
-//! when the text is done. After a minute the text is erased backwards and
-//! typed again somewhere else on the monitor, so no pixel stays lit.
+//! in ASCII and "A MINIMAL X11 DESKTOP" under it, centred on every monitor
+//! and sized for each one. The text is typed one character at a time like an
+//! old terminal, with a block cursor that blinks once a second when it is
+//! done. After a minute it is erased backwards at the same calm pace, the
+//! screen stays black for a few seconds, and it is typed again, shifted a
+//! little from the centre each time so the same pixels do not stay lit.
 //!
+//! The banner takes the theme's accent colour when it reads well on black,
+//! otherwise the theme's text colour; the line under it is the muted colour.
 //! Only the characters that change are drawn and copied to the screen, so it
 //! costs about as little as `dark`. With `reduced_motion` the text appears
-//! whole, the cursor stands still and it moves once a minute. `ascii-sid`
-//! plays C64 SID tunes exactly like `dark-sid` and shows the tune under the
-//! text.
+//! whole with a still cursor and shifts once a minute. `ascii-sid` plays C64
+//! SID tunes exactly like `dark-sid` and shows the tune under the text.
 
 use super::{audio, music, random, tune_line, Show};
 use crate::config::Config;
@@ -32,20 +35,24 @@ pub const BANNER: [&str; 7] = [
 /// The line under the banner.
 pub const TAGLINE: &str = "A MINIMAL X11 DESKTOP";
 
-/// Typing pace for the banner and the line, and erasing pace.
+/// Typing pace for the banner and the line.
 const TYPE_BANNER: Duration = Duration::from_millis(28);
 const TYPE_LINE: Duration = Duration::from_millis(70);
-const ERASE: Duration = Duration::from_millis(10);
-/// The pause between the banner and the line.
+/// Erasing pace: the same rhythm backwards, a little quicker.
+const ERASE_BANNER: Duration = Duration::from_millis(18);
+const ERASE_LINE: Duration = Duration::from_millis(45);
+/// The pause between the banner and the line, both ways.
 const BREATH: Duration = Duration::from_millis(500);
 /// How long the finished text stays before it is erased.
 const HOLD: Duration = Duration::from_secs(60);
 /// Black between erasing and typing again.
-const GAP: Duration = Duration::from_millis(1500);
+const GAP: Duration = Duration::from_secs(4);
 /// The cursor's half period: on, then off, for this long each.
 const BLINK: Duration = Duration::from_millis(530);
-/// The banner's share of the narrowest monitor's width.
+/// The banner's share of each monitor's width.
 const SHARE: f32 = 0.7;
+/// The largest shift from the centre, as a share of the monitor.
+const SHIFT: f32 = 0.025;
 
 /// One character to type: where it sits relative to the text's top left.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -67,9 +74,10 @@ enum Phase {
 }
 
 /// The cells of the banner and the line, in typing order (spaces left out),
-/// and the place of the cursor once everything is typed, for a banner font
-/// `adv` pixels per character and `lh` pixels per row and a line font `adv2`
-/// per character. The line is centred under the banner.
+/// the place of the cursor once everything is typed, the text's width and
+/// the line's baseline, for a banner font `adv` pixels per character and
+/// `lh` pixels per row and a line font `adv2` per character. The line is
+/// centred under the banner.
 fn layout(
     adv: f32,
     ascent: i32,
@@ -115,28 +123,139 @@ fn layout(
     (cells, end, banner_w.max(end.x + adv2.ceil() as i32), base)
 }
 
-pub(super) struct Ascii {
-    cfg: Config,
+/// The banner size for a monitor `width` pixels wide: `SHARE` of it, given
+/// that a monospace advance is about 0.6 of the size.
+fn banner_size(width: u16) -> f32 {
+    let columns = BANNER[0].chars().count() as f32;
+    (f32::from(width) * SHARE / (columns * 0.6)).clamp(8.0, 96.0)
+}
+
+/// Relative luminance of `0xRRGGBB` (WCAG).
+fn luminance(colour: u32) -> f32 {
+    let channel = |shift: u32| {
+        let c = ((colour >> shift) & 0xff) as f32 / 255.0;
+        if c <= 0.039_28 {
+            c / 12.92
+        } else {
+            ((c + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    0.2126 * channel(16) + 0.7152 * channel(8) + 0.0722 * channel(0)
+}
+
+/// WCAG contrast between two colours, 1 to 21.
+fn contrast(a: u32, b: u32) -> f32 {
+    let (la, lb) = (luminance(a), luminance(b));
+    (la.max(lb) + 0.05) / (la.min(lb) + 0.05)
+}
+
+/// The banner colour: the theme's accent when it reads well on the
+/// background (contrast 4.5 or more), otherwise the text colour.
+pub fn banner_colour(accent: u32, foreground: u32, background: u32) -> u32 {
+    if contrast(accent, background) >= 4.5 {
+        accent
+    } else {
+        foreground
+    }
+}
+
+/// The text laid out for one monitor.
+struct Screen {
+    area: Area,
     banner: TextRenderer,
     line: TextRenderer,
-    info: TextRenderer,
-    base_text: TextRenderer,
-    /// The banner size the renderers were made for.
-    size: f32,
     cells: Vec<Cell>,
     end: Cell,
-    /// The text block's size, the tune line included.
-    block: (i32, i32),
-    /// The line's baseline in the block, for the tune under it.
-    line_base: i32,
-    /// Where the block's top left is on each monitor, window coordinates.
-    origins: Vec<(i32, i32)>,
+    /// Pixels per character, banner and line.
+    adv: (f32, f32),
+    /// Width and height of the banner and the line together.
+    text: (i32, i32),
+    /// The text's top left, window coordinates.
+    origin: (i32, i32),
+}
+
+impl Screen {
+    fn new(area: &Area, base: &TextRenderer, font_size: f32) -> Self {
+        let size = banner_size(area.width);
+        let banner = base.at_size(size);
+        let line = base.at_size((size * 1.1).max(font_size * 0.9));
+        let adv = f32::from(banner.width(&"#".repeat(100))) / 100.0;
+        let adv2 = f32::from(line.width(&"A".repeat(100))) / 100.0;
+        let lh = i32::from(banner.ascent() + banner.descent());
+        let (cells, end, width, line_base) = layout(
+            adv,
+            i32::from(banner.ascent()),
+            lh,
+            adv2,
+            i32::from(line.ascent()),
+            i32::from(line.line_height()),
+        );
+        let height = line_base + i32::from(line.descent());
+        Self {
+            area: *area,
+            banner,
+            line,
+            cells,
+            end,
+            adv: (adv, adv2),
+            text: (width, height),
+            origin: (i32::from(area.x), i32::from(area.y)),
+        }
+    }
+
+    /// Centre the text on the monitor, shifted by `r` (any number) at most
+    /// `SHIFT` of the monitor each way.
+    fn centre(&mut self, r: u64) {
+        let a = &self.area;
+        let unit = |bits: u64| (bits & 0xffff) as f32 / 65535.0 * 2.0 - 1.0;
+        let dx = (unit(r) * SHIFT * f32::from(a.width)) as i32;
+        let dy = (unit(r >> 16) * SHIFT * f32::from(a.height)) as i32;
+        let x = i32::from(a.x) + (i32::from(a.width) - self.text.0) / 2 + dx;
+        let y = i32::from(a.y) + (i32::from(a.height) - self.text.1) / 2 + dy;
+        let max_x = i32::from(a.x) + (i32::from(a.width) - self.text.0).max(0);
+        let max_y = i32::from(a.y) + (i32::from(a.height) - self.text.1).max(0);
+        self.origin = (
+            x.clamp(i32::from(a.x), max_x),
+            y.clamp(i32::from(a.y), max_y),
+        );
+    }
+
+    /// The rectangle a cell covers, window coordinates.
+    fn rect(&self, cell: &Cell) -> (i16, i16, u16, u16) {
+        let (r, adv) = if cell.row_kind == 0 {
+            (&self.banner, self.adv.0)
+        } else {
+            (&self.line, self.adv.1)
+        };
+        let top = cell.y - i32::from(r.ascent());
+        let h = i32::from(r.ascent() + r.descent());
+        (
+            clamp(self.origin.0 + cell.x),
+            clamp(self.origin.1 + top),
+            adv.ceil().max(1.0) as u16,
+            h.clamp(1, i32::from(u16::MAX)) as u16,
+        )
+    }
+
+    /// The cell at `index`, or the end when everything is typed.
+    fn cell(&self, index: usize) -> Cell {
+        self.cells.get(index).copied().unwrap_or(self.end)
+    }
+}
+
+pub(super) struct Ascii {
+    cfg: Config,
+    base: TextRenderer,
+    info: TextRenderer,
+    screens: Vec<Screen>,
     areas: Vec<Area>,
-    /// How many cells are typed.
+    /// The banner's colour, from the theme.
+    accent: u32,
+    /// How many cells are typed (the same on every monitor).
     shown: usize,
     phase: Phase,
     cursor_on: bool,
-    /// When the hold, gap or blink step is due; with `typing` the next key.
+    /// When the next step is due.
     next: Option<Instant>,
     hold_until: Option<Instant>,
     on: bool,
@@ -145,7 +264,6 @@ pub(super) struct Ascii {
     listen: Option<audio::Audio>,
     stop_on_display_off: bool,
     tune: Option<String>,
-    seed: u64,
 }
 
 impl Ascii {
@@ -157,24 +275,14 @@ impl Ascii {
         let listen = music
             .is_some()
             .then(|| audio::Audio::start("niruscreensaver", None));
+        let p = &cfg.palette;
         let mut me = Self {
             cfg: cfg.clone(),
-            banner: text.at_size(cfg.font_size),
-            line: text.at_size(cfg.font_size),
+            base: text.at_size(cfg.font_size),
             info,
-            base_text: text.at_size(cfg.font_size),
-            size: 0.0,
-            cells: Vec::new(),
-            end: Cell {
-                ch: ' ',
-                row_kind: 1,
-                x: 0,
-                y: 0,
-            },
-            block: (1, 1),
-            line_base: 0,
-            origins: Vec::new(),
+            screens: Vec::new(),
             areas: Vec::new(),
+            accent: banner_colour(p.focus, p.foreground, p.background),
             shown: 0,
             phase: Phase::Typing,
             cursor_on: true,
@@ -186,199 +294,132 @@ impl Ascii {
             listen,
             stop_on_display_off: settings.stop_on_display_off,
             tune: None,
-            seed: random(),
         };
         me.fit(&surface.areas);
         if me.cfg.reduced_motion {
-            me.shown = me.cells.len();
+            me.shown = me.cells_len();
             me.phase = Phase::Hold;
             me.next = Some(Instant::now() + HOLD);
         }
         me
     }
 
-    /// Size the banner for the narrowest monitor and place the block.
+    fn cells_len(&self) -> usize {
+        self.screens.first().map_or(0, |s| s.cells.len())
+    }
+
+    /// Lay the text out for every monitor and centre it.
     fn fit(&mut self, areas: &[Area]) {
         self.areas = areas.to_vec();
-        let narrow = areas.iter().map(|a| a.width).min().unwrap_or(1024);
-        let columns = BANNER[0].chars().count() as f32;
-        // A monospace advance is about 0.6 of the size.
-        let size = (f32::from(narrow) * SHARE / (columns * 0.6)).clamp(8.0, 72.0);
-        if (size - self.size).abs() > 0.5 {
-            self.size = size;
-            self.banner = self.base_text.at_size(size);
-            self.line = self
-                .base_text
-                .at_size((size * 1.1).max(self.cfg.font_size * 0.9));
-        }
-        let probe = "#".repeat(100);
-        let adv = f32::from(self.banner.width(&probe)) / 100.0;
-        let adv2 = f32::from(self.line.width(&"A".repeat(100))) / 100.0;
-        let lh = i32::from(self.banner.ascent() + self.banner.descent());
-        let gap = i32::from(self.line.line_height());
-        let (cells, end, width, line_base) = layout(
-            adv,
-            i32::from(self.banner.ascent()),
-            lh,
-            adv2,
-            i32::from(self.line.ascent()),
-            gap,
-        );
-        self.cells = cells;
-        self.end = end;
-        self.line_base = line_base;
-        let tune_h = i32::from(self.info.line_height()) * 2;
-        self.block = (
-            width + 2,
-            line_base + i32::from(self.line.descent()) + tune_h + 2,
-        );
-        self.place();
-    }
-
-    /// A new random top left on every monitor, inside it.
-    fn place(&mut self) {
-        let (w, h) = self.block;
-        self.origins = self
-            .areas
+        self.screens = areas
             .iter()
-            .enumerate()
-            .map(|(i, a)| {
-                let r = self.seed.rotate_left(i as u32 * 23);
-                let room_x = (i32::from(a.width) - w).max(0);
-                let room_y = (i32::from(a.height) - h).max(0);
-                let fx = (r & 0xffff) as f32 / 65535.0;
-                let fy = ((r >> 16) & 0xffff) as f32 / 65535.0;
-                (
-                    i32::from(a.x) + (fx * room_x as f32) as i32,
-                    i32::from(a.y) + (fy * room_y as f32) as i32,
-                )
-            })
+            .map(|a| Screen::new(a, &self.base, self.cfg.font_size))
             .collect();
+        self.shift();
     }
 
-    fn renderer(&mut self, kind: u8) -> &mut TextRenderer {
-        if kind == 0 {
-            &mut self.banner
-        } else {
-            &mut self.line
+    /// Centre on every monitor with a new small shift.
+    fn shift(&mut self) {
+        let seed = random();
+        for (i, screen) in self.screens.iter_mut().enumerate() {
+            screen.centre(seed.rotate_left(i as u32 * 23));
         }
-    }
-
-    /// The rectangle a cell covers, relative to the block.
-    fn cell_rect(&self, cell: &Cell) -> (i32, i32, u16, u16) {
-        let r = if cell.row_kind == 0 {
-            &self.banner
-        } else {
-            &self.line
-        };
-        let adv = if cell.row_kind == 0 {
-            f32::from(self.banner.width(&"#".repeat(100))) / 100.0
-        } else {
-            f32::from(self.line.width(&"A".repeat(100))) / 100.0
-        };
-        let top = cell.y - i32::from(r.ascent());
-        let h = i32::from(r.ascent() + r.descent());
-        (
-            cell.x,
-            top,
-            adv.ceil().max(1.0) as u16,
-            h.clamp(1, i32::from(u16::MAX)) as u16,
-        )
-    }
-
-    /// The cell the cursor sits on: the next one to type, or the end.
-    fn cursor_cell(&self) -> Cell {
-        self.cells.get(self.shown).copied().unwrap_or(self.end)
     }
 
     fn colour(&self, kind: u8) -> u32 {
         if kind == 0 {
-            self.cfg.palette.foreground
+            self.accent
         } else {
             self.cfg.palette.muted
         }
     }
 
-    /// Fill one cell with `colour` on every monitor, into the back buffer.
-    fn fill(&self, s: &Surface, cell: &Cell, colour: u32, present: bool) -> Result<()> {
-        let (x, y, w, h) = self.cell_rect(cell);
+    /// Fill cell `index` with `colour` on every monitor.
+    fn fill(&self, s: &Surface, index: usize, colour: u32, present: bool) -> Result<()> {
         s.c.change_gc(s.gc, &ChangeGCAux::new().foreground(colour))?;
-        for &(ox, oy) in &self.origins {
-            let (rx, ry) = (clamp(ox + x), clamp(oy + y));
+        for screen in &self.screens {
+            let (x, y, width, height) = screen.rect(&screen.cell(index));
             s.c.poly_fill_rectangle(
                 s.back,
                 s.gc,
                 &[Rectangle {
-                    x: rx,
-                    y: ry,
-                    width: w,
-                    height: h,
+                    x,
+                    y,
+                    width,
+                    height,
                 }],
             )?;
             if present {
-                s.present_rect(rx, ry, w, h)?;
+                s.present_rect(x, y, width, height)?;
             }
         }
         Ok(())
     }
 
-    /// Draw one typed cell on every monitor.
-    fn draw(&mut self, s: &Surface, cell: Cell, present: bool) -> Result<()> {
+    /// Draw typed cell `index` on every monitor.
+    fn draw(&mut self, s: &Surface, index: usize, present: bool) -> Result<()> {
         let bg = self.cfg.palette.background;
-        self.fill(s, &cell, bg, false)?;
-        let fg = self.colour(cell.row_kind);
-        let origins = self.origins.clone();
-        let text = cell.ch.to_string();
-        let rect = self.cell_rect(&cell);
-        for (ox, oy) in origins {
-            self.renderer(cell.row_kind).draw_left(
+        self.fill(s, index, bg, false)?;
+        let Some(kind) = self.kind(index) else {
+            return Ok(());
+        };
+        let fg = self.colour(kind);
+        for screen in &mut self.screens {
+            let cell = screen.cell(index);
+            let (ox, oy) = screen.origin;
+            let renderer = if kind == 0 {
+                &mut screen.banner
+            } else {
+                &mut screen.line
+            };
+            renderer.draw_left(
                 &s.c,
                 s.gc,
                 s.back,
                 s.depth,
                 clamp(ox + cell.x),
                 clamp(oy + cell.y),
-                &text,
+                &cell.ch.to_string(),
                 fg,
                 bg,
             )?;
             if present {
-                s.present_rect(clamp(ox + rect.0), clamp(oy + rect.1), rect.2, rect.3)?;
+                let (x, y, w, h) = screen.rect(&cell);
+                s.present_rect(x, y, w, h)?;
             }
         }
         Ok(())
     }
 
-    fn draw_cursor(&mut self, s: &Surface, on: bool, present: bool) -> Result<()> {
-        let cell = self.cursor_cell();
-        // Under the cursor there is never a typed character: it sits on the
-        // next one to type, or one space after the line.
+    /// The cursor sits on the next cell to type, or one space after the
+    /// line; there is never a typed character under it.
+    fn draw_cursor(&self, s: &Surface, on: bool, present: bool) -> Result<()> {
         let colour = if on {
             self.cfg.palette.foreground
         } else {
             self.cfg.palette.background
         };
-        self.fill(s, &cell, colour, present)
+        self.fill(s, self.shown, colour, present)
     }
 
     /// The tune line under the text, redrawn whole.
     fn draw_tune(&mut self, s: &Surface, present: bool) -> Result<()> {
         let bg = self.cfg.palette.background;
-        let top = self.line_base + i32::from(self.line.descent()) + 1;
-        let h = (self.block.1 - top).clamp(1, i32::from(u16::MAX)) as u16;
-        let w = self.block.0.clamp(1, i32::from(u16::MAX)) as u16;
-        let centre = self.block.0 / 2;
-        let baseline = top + i32::from(self.info.line_height()) / 2 + i32::from(self.info.ascent());
-        let tune = self.tune.clone();
         let colour = self.cfg.palette.muted;
-        for (ox, oy) in self.origins.clone() {
+        let tune = self.tune.clone();
+        let line_h = i32::from(self.info.line_height());
+        let ascent = i32::from(self.info.ascent());
+        for screen in &self.screens {
+            let top = screen.origin.1 + screen.text.1 + line_h / 2;
+            let (x0, w) = (i32::from(screen.area.x), screen.area.width);
+            let h = (line_h * 2).clamp(1, i32::from(u16::MAX)) as u16;
             s.c.change_gc(s.gc, &ChangeGCAux::new().foreground(bg))?;
             s.c.poly_fill_rectangle(
                 s.back,
                 s.gc,
                 &[Rectangle {
-                    x: clamp(ox),
-                    y: clamp(oy + top),
+                    x: clamp(x0),
+                    y: clamp(top),
                     width: w,
                     height: h,
                 }],
@@ -389,30 +430,47 @@ impl Ascii {
                     s.gc,
                     s.back,
                     s.depth,
-                    clamp(ox + centre),
-                    clamp(oy + baseline),
+                    clamp(screen.origin.0 + screen.text.0 / 2),
+                    clamp(top + line_h / 2 + ascent),
                     tune,
                     colour,
                     bg,
                 )?;
             }
             if present {
-                s.present_rect(clamp(ox), clamp(oy + top), w, h)?;
+                s.present_rect(clamp(x0), clamp(top), w, h)?;
             }
         }
         Ok(())
     }
 
+    fn kind(&self, index: usize) -> Option<u8> {
+        self.screens
+            .first()
+            .and_then(|s| s.cells.get(index))
+            .map(|c| c.row_kind)
+    }
+
     /// The pause before the next key: the banner is quick, the line slower,
     /// with a breath between them.
     fn key_delay(&self) -> Duration {
-        match (
-            self.shown.checked_sub(1).map(|i| self.cells[i].row_kind),
-            self.cells.get(self.shown),
-        ) {
-            (Some(0), Some(next)) if next.row_kind == 1 => BREATH,
-            (_, Some(next)) if next.row_kind == 1 => TYPE_LINE,
+        let typed = self.shown.checked_sub(1).and_then(|i| self.kind(i));
+        match (typed, self.kind(self.shown)) {
+            (Some(0), Some(1)) => BREATH,
+            (_, Some(1)) => TYPE_LINE,
             _ => TYPE_BANNER,
+        }
+    }
+
+    /// The pause before the next erased character: the line first, then a
+    /// breath, then the banner.
+    fn erase_delay(&self) -> Duration {
+        let erased = self.kind(self.shown);
+        let next = self.shown.checked_sub(1).and_then(|i| self.kind(i));
+        match (erased, next) {
+            (Some(1), Some(0)) => BREATH,
+            (Some(1), _) | (None, _) => ERASE_LINE,
+            _ => ERASE_BANNER,
         }
     }
 }
@@ -428,13 +486,10 @@ impl Show for Ascii {
         }
         s.clear(self.cfg.palette.background)?;
         if self.phase != Phase::Gap {
-            for i in 0..self.shown.min(self.cells.len()) {
-                let cell = self.cells[i];
-                self.draw(s, cell, false)?;
+            for i in 0..self.shown.min(self.cells_len()) {
+                self.draw(s, i, false)?;
             }
-            if !self.cfg.reduced_motion || self.phase == Phase::Hold {
-                self.draw_cursor(s, self.cursor_on, false)?;
-            }
+            self.draw_cursor(s, self.cursor_on, false)?;
             self.draw_tune(s, false)?;
         }
         s.present()?;
@@ -446,10 +501,9 @@ impl Show for Ascii {
 
     fn step(&mut self, s: &mut Surface, now: Instant) -> Result<()> {
         if self.cfg.reduced_motion {
-            // Whole text, still cursor, a new place every minute.
-            self.seed = random();
-            self.place();
-            self.shown = self.cells.len();
+            // Whole text, still cursor, a new small shift every minute.
+            self.shift();
+            self.shown = self.cells_len();
             self.phase = Phase::Hold;
             self.cursor_on = true;
             self.next = Some(now + HOLD);
@@ -457,14 +511,13 @@ impl Show for Ascii {
         }
         match self.phase {
             Phase::Typing => {
-                if self.shown < self.cells.len() {
-                    let cell = self.cells[self.shown];
-                    self.draw(s, cell, true)?;
+                if self.shown < self.cells_len() {
+                    self.draw(s, self.shown, true)?;
                     self.shown += 1;
                     self.cursor_on = true;
                     self.draw_cursor(s, true, true)?;
                 }
-                if self.shown >= self.cells.len() {
+                if self.shown >= self.cells_len() {
                     self.phase = Phase::Hold;
                     self.hold_until = Some(now + HOLD);
                     self.next = Some(now + BLINK);
@@ -474,10 +527,10 @@ impl Show for Ascii {
             }
             Phase::Hold => {
                 if self.hold_until.is_some_and(|t| now >= t) {
-                    self.cursor_on = false;
-                    self.draw_cursor(s, false, true)?;
+                    self.cursor_on = true;
+                    self.draw_cursor(s, true, true)?;
                     self.phase = Phase::Erasing;
-                    self.next = Some(now + ERASE);
+                    self.next = Some(now + BREATH);
                 } else {
                     self.cursor_on = !self.cursor_on;
                     self.draw_cursor(s, self.cursor_on, true)?;
@@ -488,10 +541,8 @@ impl Show for Ascii {
                 if self.shown > 0 {
                     self.draw_cursor(s, false, true)?;
                     self.shown -= 1;
-                    let cell = self.cells[self.shown];
-                    self.fill(s, &cell, self.cfg.palette.background, true)?;
                     self.draw_cursor(s, true, true)?;
-                    self.next = Some(now + ERASE);
+                    self.next = Some(now + self.erase_delay());
                 } else {
                     self.phase = Phase::Gap;
                     self.next = Some(now + GAP);
@@ -501,13 +552,12 @@ impl Show for Ascii {
                 }
             }
             Phase::Gap => {
-                self.seed = random();
-                self.place();
+                self.shift();
                 self.phase = Phase::Typing;
                 self.cursor_on = true;
                 self.draw_cursor(s, true, true)?;
                 self.draw_tune(s, true)?;
-                self.next = Some(now + TYPE_BANNER * 8);
+                self.next = Some(now + BREATH);
             }
         }
         Ok(())
@@ -621,13 +671,34 @@ mod tests {
     }
 
     #[test]
-    fn typing_takes_a_few_seconds() {
+    fn typing_and_erasing_take_a_few_seconds_each() {
         let hashes: u32 = BANNER.iter().map(|r| r.matches('#').count() as u32).sum();
         let letters = TAGLINE.chars().filter(|c| *c != ' ').count() as u32;
-        let total = TYPE_BANNER * hashes + BREATH + TYPE_LINE * letters;
+        let typing = TYPE_BANNER * hashes + BREATH + TYPE_LINE * letters;
+        let erasing = ERASE_LINE * letters + BREATH + ERASE_BANNER * hashes;
         assert!(
-            total > Duration::from_secs(4) && total < Duration::from_secs(10),
-            "{total:?}"
+            typing > Duration::from_secs(4) && typing < Duration::from_secs(10),
+            "{typing:?}"
         );
+        assert!(
+            erasing > Duration::from_secs(2) && erasing < typing,
+            "{erasing:?}"
+        );
+        assert!(GAP >= Duration::from_secs(3));
+    }
+
+    #[test]
+    fn each_monitor_gets_its_own_size() {
+        assert!(banner_size(3840) > banner_size(1920));
+        assert!(banner_size(1920) > banner_size(1366));
+        assert_eq!(banner_size(100), 8.0);
+    }
+
+    #[test]
+    fn the_accent_is_used_only_when_it_reads_on_black() {
+        // Forest Vigil's green reads well; Noir's dark grey does not.
+        assert_eq!(banner_colour(0x8aa87e, 0xd8ded2, 0), 0x8aa87e);
+        assert_eq!(banner_colour(0x5a5a60, 0xe5e5e5, 0), 0xe5e5e5);
+        assert!(contrast(0xffffff, 0) > 20.0);
     }
 }
