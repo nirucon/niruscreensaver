@@ -52,16 +52,21 @@ pub enum Scene {
     Photos,
     Dark,
     DarkSid,
+    /// "NIRUX ascii": the banner typed out, see `crate::scenes::ascii`.
+    Ascii,
+    AsciiSid,
     Shuffle,
 }
 
 impl Scene {
     /// Every scene, in the order the picker lists them.
-    pub const ALL: [Scene; 5] = [
+    pub const ALL: [Scene; 7] = [
         Scene::Clock,
         Scene::Photos,
         Scene::Dark,
         Scene::DarkSid,
+        Scene::Ascii,
+        Scene::AsciiSid,
         Scene::Shuffle,
     ];
 
@@ -71,6 +76,8 @@ impl Scene {
             "photos" => Some(Self::Photos),
             "dark" => Some(Self::Dark),
             "dark-sid" => Some(Self::DarkSid),
+            "ascii" => Some(Self::Ascii),
+            "ascii-sid" => Some(Self::AsciiSid),
             "shuffle" => Some(Self::Shuffle),
             _ => None,
         }
@@ -82,6 +89,8 @@ impl Scene {
             Self::Photos => "photos",
             Self::Dark => "dark",
             Self::DarkSid => "dark-sid",
+            Self::Ascii => "ascii",
+            Self::AsciiSid => "ascii-sid",
             Self::Shuffle => "shuffle",
         }
     }
@@ -92,6 +101,8 @@ impl Scene {
             Self::Photos => "Slide show with a slow drift and a small clock",
             Self::Dark => "Black, only the NIRUX line gliding across each screen",
             Self::DarkSid => "As dark, with C64 SID tunes when nothing else plays",
+            Self::Ascii => "NIRUX ascii: the NIRUX banner typed out, A MINIMAL X11 DESKTOP below",
+            Self::AsciiSid => "As ascii, with C64 SID tunes when nothing else plays",
             Self::Shuffle => "Another scene from the shuffle list every time",
         }
     }
@@ -429,7 +440,10 @@ impl Config {
                     x.as_str()
                         .and_then(Scene::parse)
                         .filter(|s| *s != Scene::Shuffle)
-                        .ok_or_else(|| "shuffle lists clock, photos, dark or dark-sid".to_string())
+                        .ok_or_else(|| {
+                            "shuffle lists clock, photos, dark, dark-sid, ascii or ascii-sid"
+                                .to_string()
+                        })
                 })
                 .collect::<std::result::Result<Vec<_>, _>>()?;
             let mut unique = Vec::new();

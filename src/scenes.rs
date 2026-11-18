@@ -1,4 +1,5 @@
-//! The scenes besides the clock: `photos`, `dark` and `dark-sid`.
+//! The scenes besides the clock: `photos`, `dark`, `dark-sid`, `ascii` and
+//! `ascii-sid` (the last two in [`ascii`]).
 //!
 //! They share the clock's window, grabs, monitors and dismissal (any key or
 //! click, the swallowed release, `dismiss_on_motion`) and its power rule:
@@ -30,6 +31,8 @@ use std::time::{Duration, Instant};
 use x11rb::connection::{Connection, RequestConnection};
 use x11rb::protocol::xproto::*;
 use x11rb::protocol::Event;
+
+mod ascii;
 
 /// The line the dark scenes show.
 pub const DARK_LINE: &str = "NIRUX - A MINIMAL X11 DESKTOP";
@@ -80,7 +83,7 @@ pub fn photos(cfg: &Config) -> Vec<PathBuf> {
     images::list(&crate::config::expand_home(&cfg.photos_folder))
 }
 
-/// Run `scene` (photos, dark or dark-sid) until a key or click.
+/// Run `scene` (photos, dark, dark-sid, ascii or ascii-sid) until a key or click.
 pub fn run(
     cfg: Config,
     coverage: core::Coverage,
@@ -96,6 +99,12 @@ pub fn run(
     let text = TextRenderer::new(&font, cfg.font_size, &setup)?;
     let mut show: Box<dyn Show> = match scene {
         Scene::Photos => Box::new(Photos::new(&cfg, &text, &surface, pictures)?),
+        Scene::Ascii | Scene::AsciiSid => Box::new(ascii::Ascii::new(
+            &cfg,
+            &text,
+            &surface,
+            scene == Scene::AsciiSid,
+        )),
         _ => Box::new(Dark::new(&cfg, &text, &surface, scene == Scene::DarkSid)),
     };
     let mut power = cava::DisplayPower::new(&surface.c);

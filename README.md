@@ -20,8 +20,8 @@ NIRULOCK's job.
 
 ## Features
 
-- Five scenes: `clock` (default), `photos`, `dark`, `dark-sid` and
-  `shuffle`, chosen in `screensaver.toml`, with `niruscreensaver --set scene
+- Seven scenes: `clock` (default), `photos`, `dark`, `dark-sid`, `ascii`,
+  `ascii-sid` and `shuffle`, chosen in `screensaver.toml`, with `niruscreensaver --set scene
   NAME` or in the launcher (NIRUX Settings, then Screensaver).
 - Five clock layouts: `cava` (default), `minimal`, `terminal`, `runic` and `corner`.
 - `visual = "auto"`: the CAVA spectrum only while music plays, otherwise a
@@ -104,6 +104,8 @@ saver stays above the bars and every other window. Any key or click dismisses it
 | `photos` | The pictures in `photos_folder` (default `~/Pictures/Wallpapers/NIRU`, the NIRUX wallpapers), each for `photos_seconds`, drifting slowly and crossfading, with a small clock on a soft shade in the corner |
 | `dark` | Black, with only the line "NIRUX - A MINIMAL X11 DESKTOP" gliding slowly across each screen and bouncing off its edges, so no pixel stays lit |
 | `dark-sid` | As `dark`, with C64 SID tunes and the tune's title, composer and year under the line |
+| `ascii` | "NIRUX ascii": black, with a large NIRUX banner in ASCII and "A MINIMAL X11 DESKTOP" under it, typed out one character at a time behind a block cursor that blinks once a second when the text is done. After a minute it is erased backwards and typed again somewhere else on each screen |
+| `ascii-sid` | As `ascii`, with C64 SID tunes like `dark-sid` and the tune under the text |
 | `shuffle` | One of the scenes in `shuffle` (default `clock`, `photos` and `dark`), a new pick every time |
 
 `photos` reads PNG and JPEG files two folder levels deep. When a picture
@@ -111,11 +113,11 @@ exists as `-4k` and `-8k` (the NIRUX wallpaper sets), the 4K one is used;
 large JPEGs are decoded at a reduced size. Without any pictures the clock is
 shown instead.
 
-`dark-sid` plays exactly like NIRULOCK's pause music and shares its player:
+`dark-sid` and `ascii-sid` play exactly like NIRULOCK's pause music and shares its player:
 `sidplayfp` plays the `.sid` files in the folder from NIRULOCK's
 `[pause_music]` (default `~/Music/SID`, set in `~/.config/niruui/lock.toml`),
 in natural order, and only if nothing else played during the first
-2 seconds. Choosing `dark-sid` is the choice to play, so it also plays when
+2 seconds. Choosing `dark-sid` or `ascii-sid` is the choice to play, so it also plays when
 `niruidle` starts the saver; NIRULOCK's `enabled` and `on` do not apply. The
 music stops when the display goes off, when a key or click ends the saver,
 and when the lock takes over (`niruidle` ends the saver, and the player ends
@@ -123,8 +125,10 @@ with it). Without `sidplayfp` or tunes it stays silent.
 
 With several monitors every scene draws on each one: the slide show scales
 the picture for each screen, and the dark line glides on every screen on its
-own path. `reduced_motion = true` stops the drift and crossfade and moves
-the dark line once a minute instead.
+own path; `ascii` types the same text on every screen, each in its own
+place. `reduced_motion = true` stops the drift and crossfade and moves
+the dark line once a minute instead; `ascii` then shows the whole text at
+once, with a still cursor, in a new place every minute.
 
 ### Clock layouts
 
@@ -161,7 +165,7 @@ Settings live in `~/.config/niruui/screensaver.toml` (XDG respected); see
 in `~/.config/niruwm/config.toml`; `[palette]` overrides affect content only.
 
 ```toml
-scene = "clock"                 # clock, photos, dark, dark-sid, shuffle
+scene = "clock"                 # clock, photos, dark, dark-sid, ascii, ascii-sid, shuffle
 shuffle = ["clock", "photos", "dark"]
 photos_folder = "~/Pictures/Wallpapers/NIRU"
 photos_seconds = 20             # 5 to 3600
@@ -202,7 +206,7 @@ only used when the shared file sets no `[idle]` values.
   `_NET_WM_WINDOW_OPACITY`; the window class is `NIRUSCREENSAVER`.
 - **No spectrum.** CAVA is not installed, `visual` is `quotes` or `none`, or
   (with `auto`) nothing is playing loud enough.
-- **No music with `dark-sid`.** `sidplayfp` must be installed and the folder
+- **No music with `dark-sid` or `ascii-sid`.** `sidplayfp` must be installed and the folder
   (NIRULOCK's `[pause_music] folder`, default `~/Music/SID`) must hold `.sid`
   files; other audio playing as the saver starts keeps it silent.
 - **`photos` shows the clock.** `photos_folder` has no PNG or JPEG pictures;
