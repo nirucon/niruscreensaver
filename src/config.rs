@@ -55,18 +55,21 @@ pub enum Scene {
     /// "NIRUX ascii": the banner typed out, see `crate::scenes::ascii`.
     Ascii,
     AsciiSid,
+    /// A realtime demoscene demo by NIRUDEMO, see `crate::scenes::demo`.
+    Demo,
     Shuffle,
 }
 
 impl Scene {
     /// Every scene, in the order the picker lists them.
-    pub const ALL: [Scene; 7] = [
+    pub const ALL: [Scene; 8] = [
         Scene::Clock,
         Scene::Photos,
         Scene::Dark,
         Scene::DarkSid,
         Scene::Ascii,
         Scene::AsciiSid,
+        Scene::Demo,
         Scene::Shuffle,
     ];
 
@@ -78,6 +81,7 @@ impl Scene {
             "dark-sid" => Some(Self::DarkSid),
             "ascii" => Some(Self::Ascii),
             "ascii-sid" => Some(Self::AsciiSid),
+            "demo" => Some(Self::Demo),
             "shuffle" => Some(Self::Shuffle),
             _ => None,
         }
@@ -91,6 +95,7 @@ impl Scene {
             Self::DarkSid => "dark-sid",
             Self::Ascii => "ascii",
             Self::AsciiSid => "ascii-sid",
+            Self::Demo => "demo",
             Self::Shuffle => "shuffle",
         }
     }
@@ -100,9 +105,14 @@ impl Scene {
             Self::Clock => "Large clock with the spectrum or a quote (five layouts)",
             Self::Photos => "Slide show with a slow drift and a small clock",
             Self::Dark => "Black, only the NIRUX line gliding across each screen",
-            Self::DarkSid => "As dark, with C64 SID tunes when nothing else plays",
+            Self::DarkSid => {
+                "As dark, with the NIRUX music (or the [pause_music] folder) when nothing else plays"
+            }
             Self::Ascii => "NIRUX ascii: the NIRUX banner typed out, A MINIMAL X11 DESKTOP below",
-            Self::AsciiSid => "As ascii, with C64 SID tunes when nothing else plays",
+            Self::AsciiSid => {
+                "As ascii, with the NIRUX music (or the [pause_music] folder) when nothing else plays"
+            }
+            Self::Demo => "A realtime demoscene demo by NIRUDEMO on each screen, silent",
             Self::Shuffle => "Another scene from the shuffle list every time",
         }
     }
@@ -359,9 +369,18 @@ impl Default for Config {
     }
 }
 
-/// `clock, photos, dark, dark-sid or shuffle`
+/// `clock, photos, dark, ... or shuffle`
 fn scene_names() -> String {
-    let names: Vec<&str> = Scene::ALL.iter().map(|s| s.as_str()).collect();
+    or_list(Scene::ALL.iter())
+}
+
+/// The scenes a `shuffle` list may hold: all but `shuffle`.
+fn shuffle_names() -> String {
+    or_list(Scene::ALL.iter().filter(|s| **s != Scene::Shuffle))
+}
+
+fn or_list<'a>(scenes: impl Iterator<Item = &'a Scene>) -> String {
+    let names: Vec<&str> = scenes.map(|s| s.as_str()).collect();
     let (last, rest) = names.split_last().expect("scenes");
     format!("{} or {last}", rest.join(", "))
 }
@@ -440,10 +459,7 @@ impl Config {
                     x.as_str()
                         .and_then(Scene::parse)
                         .filter(|s| *s != Scene::Shuffle)
-                        .ok_or_else(|| {
-                            "shuffle lists clock, photos, dark, dark-sid, ascii or ascii-sid"
-                                .to_string()
-                        })
+                        .ok_or_else(|| format!("shuffle lists {}", shuffle_names()))
                 })
                 .collect::<std::result::Result<Vec<_>, _>>()?;
             let mut unique = Vec::new();
@@ -486,7 +502,7 @@ impl Config {
         }
         if let Some(visual) = v.get("visual").and_then(|x| x.as_str()) {
             cfg.visual = crate::visual::Mode::parse(visual)
-                .ok_or_else(|| "visual must be auto, cava, quotes or none".to_string())?;
+                .ok_or_else(|| "visual must be auto, music, cava, quotes or none".to_string())?;
         }
         if let Some(quotes) = v.get("quotes") {
             cfg.quotes = crate::quotes::patterns(quotes)?;
@@ -631,6 +647,29 @@ mod tests {
         for scene in Scene::ALL {
             assert_eq!(Scene::parse(scene.as_str()), Some(scene));
         }
+    }
+
+    #[test]
+    fn demo_is_a_scene_and_a_shuffle_candidate_but_not_a_default() {
+        assert_eq!(Scene::parse("Demo"), Some(Scene::Demo));
+        assert!(Scene::ALL.contains(&Scene::Demo));
+        assert!(!DEFAULT_SHUFFLE.contains(&Scene::Demo));
+        let c = Config::check_text("scene = \"demo\"\nshuffle = [\"dark\", \"demo\"]").unwrap();
+        assert_eq!(c.scene, Scene::Demo);
+        assert_eq!(c.shuffle, vec![Scene::Dark, Scene::Demo]);
+        let e = Config::check_text("shuffle = [\"aurora\"]")
+            .unwrap_err()
+            .to_string();
+        assert_eq!(
+            e,
+            "shuffle lists clock, photos, dark, dark-sid, ascii, ascii-sid or demo"
+        );
+        let e = Config::check_text("scene = \"aurora\"")
+            .unwrap_err()
+            .to_string();
+        assert!(e.ends_with("ascii-sid, demo or shuffle"), "{e}");
+        assert!(Scene::Demo.description().contains("NIRUDEMO"));
+        assert!(Scene::DarkSid.description().contains("NIRUX music"));
     }
 
     #[test]

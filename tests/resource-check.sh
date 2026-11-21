@@ -228,6 +228,61 @@ sleep 2
 xdotool key space; wait_gone
 rm "$TEST/bin/cava" "$TEST/bin/playerctl"
 
+# demo: a fake nirudemo records its arguments and whether the window it was
+# given exists, then waits to be stopped. The saver keeps the input, and the
+# demo dies with it.
+printf 'scene = "demo"\n' > "$XDG_CONFIG_HOME/niruui/screensaver.toml"
+cat > "$TEST/bin/nirudemo" <<'HELPER'
+#!/bin/sh
+wid=$2
+xwininfo -id "$wid" > "$FIXTURE/demo-window" 2>&1 || echo missing >> "$FIXTURE/demo-window"
+printf '%s ' "$$" "$@" > "$FIXTURE/demo-args.tmp"
+mv "$FIXTURE/demo-args.tmp" "$FIXTURE/demo-args"
+exec sleep 300
+HELPER
+chmod +x "$TEST/bin/nirudemo"
+"$BIN" > "$TEST/saver-demo.log" 2>&1 & SAVER=$!
+i=0
+while [ ! -s "$TEST/demo-args" ] && [ "$i" -lt 60 ]; do sleep 0.05; i=$((i+1)); done
+[ -s "$TEST/demo-args" ] || { cat "$TEST/saver-demo.log"; echo "FAIL demo did not start nirudemo"; exit 1; }
+read -r demo_pid demo_into demo_wid demo_rest < "$TEST/demo-args" || :
+[ "$demo_into $demo_rest" = "--into --loop --silent " ] || [ "$demo_into $demo_rest" = "--into --loop --silent" ] ||
+  { cat "$TEST/demo-args"; echo "FAIL nirudemo command line"; exit 1; }
+case "$demo_wid" in 0x[0-9a-f]*) ;; *) echo "FAIL window id $demo_wid"; exit 1 ;; esac
+grep -q missing "$TEST/demo-window" && { cat "$TEST/demo-window"; echo "FAIL the demo window did not exist"; exit 1; }
+grep -q 'Width: 1024' "$TEST/demo-window" || { cat "$TEST/demo-window"; echo "FAIL the demo window does not cover the monitor"; exit 1; }
+sleep 2.5
+kill -0 "$demo_pid" || { cat "$TEST/saver-demo.log"; echo "FAIL nirudemo did not keep running"; exit 1; }
+[ "$(ps -o pgid= -p "$demo_pid" | tr -d ' ')" = "$demo_pid" ] || { echo "FAIL nirudemo is not in its own process group"; exit 1; }
+grep -q 'dark scene' "$TEST/saver-demo.log" && { cat "$TEST/saver-demo.log"; echo "FAIL demo fell back with a running nirudemo"; exit 1; }
+xdotool key space; wait_gone
+i=0
+while kill -0 "$demo_pid" 2>/dev/null && [ "$i" -lt 20 ]; do sleep 0.05; i=$((i+1)); done
+kill -0 "$demo_pid" 2>/dev/null && { echo "FAIL nirudemo outlived the saver"; exit 1; }
+# A nirudemo that exits at once: dark on that monitor, logged once, and the
+# saver still runs until a key.
+printf '#!/bin/sh\necho started >> "$FIXTURE/demo-quick"\nexit 1\n' > "$TEST/bin/nirudemo"
+"$BIN" > "$TEST/saver-demo-quick.log" 2>&1 & SAVER=$!
+sleep 2
+kill -0 "$SAVER" || { cat "$TEST/saver-demo-quick.log"; echo "FAIL the saver ended when nirudemo failed"; exit 1; }
+[ "$(wc -l < "$TEST/demo-quick")" -eq 1 ] || { echo "FAIL a failing nirudemo was started again"; exit 1; }
+[ "$(grep -c 'exited within 2 s; showing the dark scene' "$TEST/saver-demo-quick.log")" -eq 1 ] ||
+  { cat "$TEST/saver-demo-quick.log"; echo "FAIL the fallback was not logged once"; exit 1; }
+wid=$(xwininfo -root -tree | awk '/"NIRUSCREENSAVER"/{print $1; exit}')
+xwininfo -id "$wid" -children | grep -q '0 children' || { xwininfo -id "$wid" -children; echo "FAIL the demo window stayed"; exit 1; }
+xdotool click 1; wait_gone
+rm "$TEST/bin/nirudemo"
+# No nirudemo at all.
+if ! PATH=$TEST/bin:/usr/bin:/bin command -v nirudemo > /dev/null; then
+  PATH=$TEST/bin:/usr/bin:/bin "$BIN" > "$TEST/saver-demo-none.log" 2>&1 & SAVER=$!
+  sleep 1
+  kill -0 "$SAVER" || { cat "$TEST/saver-demo-none.log"; echo "FAIL the saver ended without nirudemo"; exit 1; }
+  grep -q 'nirudemo is not installed; showing the dark scene' "$TEST/saver-demo-none.log" ||
+    { cat "$TEST/saver-demo-none.log"; echo "FAIL a missing nirudemo was not logged"; exit 1; }
+  xdotool key space; wait_gone
+fi
+rm "$XDG_CONFIG_HOME/niruui/screensaver.toml"
+
 # A second saver cannot claim success when the first already owns the grabs.
 "$BIN" > "$TEST/saver-first.log" 2>&1 & SAVER=$!
 sleep 1
@@ -239,4 +294,4 @@ grep -q 'cannot grab' "$TEST/saver-second.log" || { cat "$TEST/saver-second.log"
 kill "$SAVER" 2>/dev/null || true
 wait "$SAVER" 2>/dev/null || true
 SAVER=
-printf 'PASS: input, mouse, resize coverage, opacity hint, swallowed dismissal input, motion, CAVA silence pause, media follower and failed-grab handling\n'
+printf 'PASS: input, mouse, resize coverage, opacity hint, swallowed dismissal input, motion, CAVA silence pause, media follower, demo scene and failed-grab handling\n'

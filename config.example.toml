@@ -8,14 +8,17 @@
 #               with a small clock; without pictures the clock is shown
 #   "dark"      black, only "NIRUX - A MINIMAL X11 DESKTOP" gliding across
 #               each screen
-#   "dark-sid"  as dark, with C64 SID tunes (sidplayfp, the folder from
-#               NIRULOCK's [pause_music], default ~/Music/SID) while nothing
-#               else plays
+#   "dark-sid"  as dark, with the NIRUX music while nothing else plays: the
+#               folder from NIRULOCK's [pause_music] (lock.toml), default
+#               ~/.local/share/nirux/music (NIRUX's own chiptunes); .sid
+#               tunes and .ogg/.opus/.flac/.wav files
 #   "ascii"     "NIRUX ascii": a large NIRUX banner in ASCII with "A MINIMAL
 #               X11 DESKTOP" under it, centred on every screen in the
 #               theme's accent colour, typed out behind a blinking cursor,
 #               erased and typed again every minute after a short pause
-#   "ascii-sid" as ascii, with C64 SID tunes like dark-sid
+#   "ascii-sid" as ascii, with the music like dark-sid
+#   "demo"      a realtime demoscene demo by NIRUDEMO on each screen,
+#               silent; dark where nirudemo is missing or fails
 #   "shuffle"   one of the scenes in `shuffle`, a new pick every time
 scene = "clock"
 shuffle = ["clock", "photos", "dark"]
@@ -37,6 +40,7 @@ visualizer = true
 #            quote from ~/.config/niru/quotes/ (the default)
 #   "cava"   the spectrum alone, as before 0.19 (CAVA runs whenever the display is on)
 #   "quotes" quotes alone; CAVA never starts
+#   "music"  the spectrum while music plays, otherwise nothing
 #   "none"   neither (visualizer = false also means this)
 visual = "auto"
 # Which quote collections (~/.config/niru/quotes/NAME.txt) to show, by name;

@@ -19,9 +19,9 @@ Usage: niruscreensaver --list
        niruscreensaver --shuffle add|remove|toggle SCENE
 
 Keys for --set:
-  scene              clock, photos, dark, dark-sid, ascii, ascii-sid or shuffle
+  scene              clock, photos, dark, dark-sid, ascii, ascii-sid, demo or shuffle
   layout             cava, minimal, terminal, runic or corner (the clock scene)
-  visual             auto, cava, quotes or none (the clock scene)
+  visual             auto, music, cava, quotes or none (the clock scene)
   shuffle            scenes separated by commas, such as clock,photos,dark
   photos_folder      a folder of PNG or JPEG pictures
   photos_seconds     5 to 3600
@@ -267,6 +267,17 @@ mod tests {
         let one = with_setting("", "shuffle", "dark").unwrap();
         assert!(with_shuffle(&one, "remove", "dark").is_err());
         assert!(with_shuffle("", "add", "shuffle").is_err());
+    }
+
+    #[test]
+    fn demo_can_be_set_and_shuffled() {
+        let text = with_setting(FILE, "scene", "demo").unwrap();
+        assert!(text.contains("scene = \"demo\""));
+        let text = with_shuffle("", "add", "demo").unwrap();
+        assert!(text.contains("shuffle = [\"clock\", \"photos\", \"dark\", \"demo\"]"));
+        let lines = list_lines(&Config::check_text("").unwrap());
+        assert!(lines.contains("demo\toff\t-\t"));
+        assert!(with_setting("", "visual", "music").is_ok());
     }
 
     #[test]

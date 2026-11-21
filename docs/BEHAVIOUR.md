@@ -85,6 +85,27 @@ The spectrum only runs while it can be seen and has something to show:
   CAVA dies with the saver (`PDEATHSIG`), and its temporary config is removed
   after the first frame.
 
+## The demo scene
+
+`demo` creates one black child window per monitor inside the saver's window
+and starts `nirudemo --into 0xWINDOW --loop --silent` for each, once the
+window exists on the server. The window has no event mask: every key, click
+and motion goes to the saver, which holds the keyboard and pointer grabs, so
+dismissing works exactly as in the other scenes and NIRUDEMO never sees input.
+NIRUDEMO draws over its own X connection and follows the window's size; the
+saver moves and resizes the windows when the monitors change and starts over
+when their number changes.
+
+Each NIRUDEMO runs in its own session and process group, with stdin, stdout
+and stderr on `/dev/null`, and `PR_SET_PDEATHSIG` set to `SIGKILL`, so it
+dies with the saver even if the saver is killed. When the saver ends or the
+display goes off its group gets `SIGTERM`, then `SIGKILL` after 0.5 s, and it
+is reaped; it starts again when the display comes back. Without `nirudemo` on
+`PATH`, or when one exits within 2 s of its start, that monitor shows the
+`dark` scene instead (one log line); one that ends later is started again.
+While the demos run the saver looks at them every 2 s (every 0.2 s in their
+first 2 s) and draws nothing itself. The scene plays no music.
+
 ## Shared code
 
 The CAVA, audio detector, panel and quotes code is shared verbatim with

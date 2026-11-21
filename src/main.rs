@@ -24,8 +24,9 @@ mod core;
 mod editor;
 mod images;
 mod media;
-// Verbatim NIRULOCK twins for `dark-sid`: the pause-music player, the SID
-// header and song lengths, and the lock reasons its settings parse.
+// Verbatim NIRULOCK twins for `dark-sid` and `ascii-sid`: the pause-music
+// player (NIRUX's music, audio files and SID tunes), the SID header, song
+// lengths and info lines, and the lock reasons its settings parse.
 #[allow(dead_code)]
 mod music;
 mod palette;

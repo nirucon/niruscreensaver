@@ -1,5 +1,5 @@
 //! The scenes besides the clock: `photos`, `dark`, `dark-sid`, `ascii` and
-//! `ascii-sid` (the last two in [`ascii`]).
+//! `ascii-sid` (the last two in [`ascii`]), and `demo` (in [`demo`]).
 //!
 //! They share the clock's window, grabs, monitors and dismissal (any key or
 //! click, the swallowed release, `dismiss_on_motion`) and its power rule:
@@ -9,10 +9,11 @@
 //! - `dark`: black, with one line, "NIRUX - A MINIMAL X11 DESKTOP", gliding
 //!   slowly across every monitor and bouncing off its edges, so no pixel
 //!   stays lit. With `reduced_motion` it moves once a minute instead.
-//! - `dark-sid`: the same, and C64 SID tunes through NIRULOCK's pause-music
-//!   player (`crate::music`, a verbatim twin): only when nothing else plays,
-//!   from the folder in NIRULOCK's `[pause_music]` (default `~/Music/SID`),
-//!   with the tune under the line. It stops when the display goes off and
+//! - `dark-sid`: the same, with music through NIRULOCK's pause-music player
+//!   (`crate::music`, a verbatim twin): only when nothing else plays, from
+//!   the folder in NIRULOCK's `[pause_music]` (default NIRUX's own chiptunes
+//!   in `~/.local/share/nirux/music`; `.sid` tunes and audio files), with the
+//!   tune under the line. It stops when the display goes off and
 //!   when the saver goes; NIRUIDLE ends the saver when it locks, and the
 //!   player dies with it (`PR_SET_PDEATHSIG`).
 //! - `photos`: the pictures in `photos_folder`, each for `photos_seconds`,
@@ -33,6 +34,7 @@ use x11rb::protocol::xproto::*;
 use x11rb::protocol::Event;
 
 mod ascii;
+mod demo;
 
 /// The line the dark scenes show.
 pub const DARK_LINE: &str = "NIRUX - A MINIMAL X11 DESKTOP";
@@ -48,6 +50,11 @@ trait Show {
     /// Called once per loop turn; true asks for a full redraw.
     fn tick(&mut self, _now: Instant) -> bool {
         false
+    }
+    /// Called once per loop turn with the surface, for a scene that
+    /// manages windows; true asks for a full redraw.
+    fn poll(&mut self, _s: &mut Surface, _now: Instant) -> Result<bool> {
+        Ok(false)
     }
     fn display(&mut self, on: bool);
     fn wake_fds(&self) -> [Option<RawFd>; 2] {
@@ -83,7 +90,8 @@ pub fn photos(cfg: &Config) -> Vec<PathBuf> {
     images::list(&crate::config::expand_home(&cfg.photos_folder))
 }
 
-/// Run `scene` (photos, dark, dark-sid, ascii or ascii-sid) until a key or click.
+/// Run `scene` (photos, dark, dark-sid, ascii, ascii-sid or demo) until a key
+/// or click.
 pub fn run(
     cfg: Config,
     coverage: core::Coverage,
@@ -105,6 +113,7 @@ pub fn run(
             &surface,
             scene == Scene::AsciiSid,
         )),
+        Scene::Demo => Box::new(demo::Demo::new(&cfg, &text, &surface)?),
         _ => Box::new(Dark::new(&cfg, &text, &surface, scene == Scene::DarkSid)),
     };
     let mut power = cava::DisplayPower::new(&surface.c);
@@ -169,6 +178,9 @@ pub fn run(
         }
         let now = Instant::now();
         if show.tick(now) {
+            full = true;
+        }
+        if show.poll(&mut surface, now)? {
             full = true;
         }
         if full {
@@ -249,6 +261,8 @@ struct Dark {
     listen: Option<audio::Audio>,
     stop_on_display_off: bool,
     tune: Option<String>,
+    /// Monitors where another scene draws (`demo`): no line there.
+    covered: Vec<Area>,
 }
 
 /// NIRULOCK's `[pause_music]` settings from `lock.toml`, so the folder is set
@@ -305,6 +319,7 @@ impl Dark {
             listen,
             stop_on_display_off: settings.stop_on_display_off,
             tune: None,
+            covered: Vec::new(),
         };
         dark.place(&surface.areas);
         dark
@@ -436,7 +451,9 @@ impl Dark {
     }
 
     fn schedule(&mut self, now: Instant) {
-        self.next = if !self.on {
+        let all_covered =
+            !self.covered.is_empty() && self.areas.iter().all(|a| self.covered.contains(a));
+        self.next = if !self.on || all_covered {
             None
         } else if self.fade.is_some() {
             Some(now + Duration::from_millis(30))
@@ -454,7 +471,10 @@ impl Dark {
             return Ok(());
         };
         let (w, h) = (i32::from(sprite.width), i32::from(sprite.height));
-        for walker in &mut self.walkers {
+        for (walker, area) in self.walkers.iter_mut().zip(&self.areas) {
+            if self.covered.contains(area) {
+                continue;
+            }
             let at = (walker.x.round() as i32, walker.y.round() as i32);
             if walker.drawn == Some(at) {
                 continue;
@@ -1286,10 +1306,17 @@ mod tests {
         assert_eq!(scaled(1920, 1200, DRIFT), (2035, 1272));
     }
 
+    fn music_line(file: &str) -> String {
+        crate::sid::audio_info_line(std::path::Path::new(file))
+    }
+
     #[test]
     fn the_tune_line_drops_the_esc_hint() {
         let info = "♪ Commando — Rob Hubbard · 1985  ·  Esc stops the music";
         assert_eq!(tune_line(info, true), "♪ Commando — Rob Hubbard · 1985");
         assert_eq!(tune_line(info, false), "Commando — Rob Hubbard · 1985");
+        let nirux = music_line("nirux-1-ginnungagap.ogg");
+        assert_eq!(tune_line(&nirux, true), "♪ Ginnungagap  ·  NIRUX 1");
+        assert_eq!(tune_line(&nirux, false), "Ginnungagap  ·  NIRUX 1");
     }
 }
