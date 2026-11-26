@@ -281,6 +281,23 @@ if ! PATH=$TEST/bin:/usr/bin:/bin command -v nirudemo > /dev/null; then
     { cat "$TEST/saver-demo-none.log"; echo "FAIL a missing nirudemo was not logged"; exit 1; }
   xdotool key space; wait_gone
 fi
+# c64: draws at 50 frames a second within a small CPU budget, never falls
+# back on a server with RENDER, leaves no shared memory behind, and a key
+# still ends it.
+printf 'scene = "c64"\n' > "$XDG_CONFIG_HOME/niruui/screensaver.toml"
+shm_before=$(ipcs -m | grep -c "$(id -un)" || :)
+"$BIN" > "$TEST/saver-c64.log" 2>&1 & SAVER=$!
+sleep 2
+kill -0 "$SAVER" || { cat "$TEST/saver-c64.log"; echo "FAIL c64 ended"; exit 1; }
+before=$(awk '{print $14+$15}' "/proc/$SAVER/stat")
+sleep 4
+after=$(awk '{print $14+$15}' "/proc/$SAVER/stat")
+c64_cpu=$(( (after - before) * 100 / $(getconf CLK_TCK) / 4 ))
+printf 'c64: %s%% of a core\n' "$c64_cpu"
+[ "$c64_cpu" -lt 15 ] || { echo "FAIL c64 used $c64_cpu% of a core"; exit 1; }
+grep -q 'dark scene' "$TEST/saver-c64.log" && { cat "$TEST/saver-c64.log"; echo "FAIL c64 fell back"; exit 1; }
+xdotool key space; wait_gone
+[ "$(ipcs -m | grep -c "$(id -un)" || :)" -le "$shm_before" ] || { ipcs -m; echo "FAIL c64 left shared memory"; exit 1; }
 rm "$XDG_CONFIG_HOME/niruui/screensaver.toml"
 
 # A second saver cannot claim success when the first already owns the grabs.
@@ -294,4 +311,4 @@ grep -q 'cannot grab' "$TEST/saver-second.log" || { cat "$TEST/saver-second.log"
 kill "$SAVER" 2>/dev/null || true
 wait "$SAVER" 2>/dev/null || true
 SAVER=
-printf 'PASS: input, mouse, resize coverage, opacity hint, swallowed dismissal input, motion, CAVA silence pause, media follower, demo scene and failed-grab handling\n'
+printf 'PASS: input, mouse, resize coverage, opacity hint, swallowed dismissal input, motion, CAVA silence pause, media follower, demo and c64 scenes and failed-grab handling\n'

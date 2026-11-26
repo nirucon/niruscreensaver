@@ -1,5 +1,6 @@
 //! The scenes besides the clock: `photos`, `dark`, `dark-sid`, `ascii` and
-//! `ascii-sid` (the last two in [`ascii`]), and `demo` (in [`demo`]).
+//! `ascii-sid` (the last two in [`ascii`]), `demo` (in [`demo`]), and `c64`
+//! and `c64-sid` (in [`c64`]).
 //!
 //! They share the clock's window, grabs, monitors and dismissal (any key or
 //! click, the swallowed release, `dismiss_on_motion`) and its power rule:
@@ -34,6 +35,7 @@ use x11rb::protocol::xproto::*;
 use x11rb::protocol::Event;
 
 mod ascii;
+mod c64;
 mod demo;
 
 /// The line the dark scenes show.
@@ -90,7 +92,7 @@ pub fn photos(cfg: &Config) -> Vec<PathBuf> {
     images::list(&crate::config::expand_home(&cfg.photos_folder))
 }
 
-/// Run `scene` (photos, dark, dark-sid, ascii, ascii-sid or demo) until a key
+/// Run `scene` (photos, dark, dark-sid, ascii, ascii-sid, demo, c64 or c64-sid) until a key
 /// or click.
 pub fn run(
     cfg: Config,
@@ -114,6 +116,16 @@ pub fn run(
             scene == Scene::AsciiSid,
         )),
         Scene::Demo => Box::new(demo::Demo::new(&cfg, &text, &surface)?),
+        Scene::C64 | Scene::C64Sid => {
+            let sid = scene == Scene::C64Sid;
+            match c64::C64::new(&cfg, &surface, sid) {
+                Ok(c64) => Box::new(c64),
+                Err(e) => {
+                    eprintln!("niruscreensaver: c64: {e}; showing the dark scene");
+                    Box::new(Dark::new(&cfg, &text, &surface, sid))
+                }
+            }
+        }
         _ => Box::new(Dark::new(&cfg, &text, &surface, scene == Scene::DarkSid)),
     };
     let mut power = cava::DisplayPower::new(&surface.c);

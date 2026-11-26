@@ -57,12 +57,15 @@ pub enum Scene {
     AsciiSid,
     /// A realtime demoscene demo by NIRUDEMO, see `crate::scenes::demo`.
     Demo,
+    /// NIRUX as a C64 demo, see `crate::scenes::c64`.
+    C64,
+    C64Sid,
     Shuffle,
 }
 
 impl Scene {
     /// Every scene, in the order the picker lists them.
-    pub const ALL: [Scene; 8] = [
+    pub const ALL: [Scene; 10] = [
         Scene::Clock,
         Scene::Photos,
         Scene::Dark,
@@ -70,6 +73,8 @@ impl Scene {
         Scene::Ascii,
         Scene::AsciiSid,
         Scene::Demo,
+        Scene::C64,
+        Scene::C64Sid,
         Scene::Shuffle,
     ];
 
@@ -82,6 +87,8 @@ impl Scene {
             "ascii" => Some(Self::Ascii),
             "ascii-sid" => Some(Self::AsciiSid),
             "demo" => Some(Self::Demo),
+            "c64" => Some(Self::C64),
+            "c64-sid" => Some(Self::C64Sid),
             "shuffle" => Some(Self::Shuffle),
             _ => None,
         }
@@ -96,6 +103,8 @@ impl Scene {
             Self::Ascii => "ascii",
             Self::AsciiSid => "ascii-sid",
             Self::Demo => "demo",
+            Self::C64 => "c64",
+            Self::C64Sid => "c64-sid",
             Self::Shuffle => "shuffle",
         }
     }
@@ -113,6 +122,10 @@ impl Scene {
                 "As ascii, with the NIRUX music (or the [pause_music] folder) when nothing else plays"
             }
             Self::Demo => "A realtime demoscene demo by NIRUDEMO on each screen, silent",
+            Self::C64 => "NIRUX as a C64 demo: rasters, logo, scroller, sphere, Yggdrasil; silent",
+            Self::C64Sid => {
+                "As c64, with the NIRUX music (or the [pause_music] folder) and effects on the beat"
+            }
             Self::Shuffle => "Another scene from the shuffle list every time",
         }
     }
@@ -662,14 +675,29 @@ mod tests {
             .to_string();
         assert_eq!(
             e,
-            "shuffle lists clock, photos, dark, dark-sid, ascii, ascii-sid or demo"
+            "shuffle lists clock, photos, dark, dark-sid, ascii, ascii-sid, demo, c64 or c64-sid"
         );
         let e = Config::check_text("scene = \"aurora\"")
             .unwrap_err()
             .to_string();
-        assert!(e.ends_with("ascii-sid, demo or shuffle"), "{e}");
+        assert!(
+            e.ends_with("ascii-sid, demo, c64, c64-sid or shuffle"),
+            "{e}"
+        );
         assert!(Scene::Demo.description().contains("NIRUDEMO"));
         assert!(Scene::DarkSid.description().contains("NIRUX music"));
+    }
+
+    #[test]
+    fn c64_and_c64_sid_are_scenes_and_shuffle_candidates_but_not_defaults() {
+        assert_eq!(Scene::parse("C64"), Some(Scene::C64));
+        assert_eq!(Scene::parse("c64_sid"), Some(Scene::C64Sid));
+        assert!(!DEFAULT_SHUFFLE.contains(&Scene::C64));
+        let c = Config::check_text("scene = \"c64-sid\"\nshuffle = [\"c64\", \"dark\"]").unwrap();
+        assert_eq!(c.scene, Scene::C64Sid);
+        assert_eq!(c.shuffle, vec![Scene::C64, Scene::Dark]);
+        assert!(Scene::C64.description().contains("silent"));
+        assert!(Scene::C64Sid.description().contains("NIRUX music"));
     }
 
     #[test]

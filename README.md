@@ -20,8 +20,8 @@ NIRULOCK's job.
 
 ## Features
 
-- Eight scenes: `clock` (default), `photos`, `dark`, `dark-sid`, `ascii`,
-  `ascii-sid`, `demo` and `shuffle`, chosen in `screensaver.toml`, with `niruscreensaver --set scene
+- Ten scenes: `clock` (default), `photos`, `dark`, `dark-sid`, `ascii`,
+  `ascii-sid`, `demo`, `c64`, `c64-sid` and `shuffle`, chosen in `screensaver.toml`, with `niruscreensaver --set scene
   NAME` or in the launcher (NIRUX Settings, then Screensaver).
 - Five clock layouts: `cava` (default), `minimal`, `terminal`, `runic` and `corner`.
 - `visual = "auto"`: the CAVA spectrum only while music plays, otherwise a
@@ -41,7 +41,7 @@ NIRULOCK's job.
 
 - Debian, Arch or Void Linux (glibc), x86_64, with X11.
 - Optional: [CAVA](https://github.com/karlstav/cava) for the spectrum;
-  for `dark-sid` and `ascii-sid` one of `pw-play` (PipeWire), `ffplay` or
+  for `dark-sid`, `ascii-sid` and `c64-sid` one of `pw-play` (PipeWire), `ffplay` or
   `mpv` for NIRUX's music and other audio files, and `sidplayfp` for `.sid`
   tunes (Debian and Void `sidplayfp`, Arch from the AUR); NIRUDEMO
   (`nirudemo`, installed by NIRUX) for `demo`; PipeWire (`pipewire-pulse`)
@@ -110,6 +110,8 @@ saver stays above the bars and every other window. Any key or click dismisses it
 | `ascii` | "NIRUX ascii": black, with a large NIRUX banner in ASCII and "A MINIMAL X11 DESKTOP" under it, centred and sized for each screen. The banner takes the theme's accent colour (the text colour when the accent is too dark to read on black). It is typed out one character at a time behind a block cursor that blinks once a second when the text is done; after a minute it is erased backwards, the screen stays black for a few seconds, and it is typed again, shifted a little from the centre |
 | `ascii-sid` | As `ascii`, with the music like `dark-sid` and the tune under the text |
 | `demo` | A realtime demoscene demo by NIRUDEMO on each screen, silent. Without NIRUDEMO the screen shows `dark` |
+| `c64` | NIRUX as a Commodore 64 demo on each screen, silent: a short BASIC boot with loading stripes, then three parts in a loop (a bouncing NIRUX logo over raster bars with a DYCP scroller that carries the time, a dot sphere among Lissajous balls under the runes for NIRUX, and Yggdrasil before a character plasma), in the sixteen C64 colours picked by the theme |
+| `c64-sid` | As `c64`, with the music like `dark-sid`, the tune in the upper border and the effects pulsing on the beat |
 | `shuffle` | One of the scenes in `shuffle` (default `clock`, `photos` and `dark`; `demo` and the others can be added), a new pick every time |
 
 `photos` reads PNG and JPEG files two folder levels deep. When a picture
@@ -117,7 +119,7 @@ exists as `-4k` and `-8k` (the NIRUX wallpaper sets), the 4K one is used;
 large JPEGs are decoded at a reduced size. Without any pictures the clock is
 shown instead.
 
-`dark-sid` and `ascii-sid` play exactly like NIRULOCK's pause music and share its player.
+`dark-sid`, `ascii-sid` and `c64-sid` play exactly like NIRULOCK's pause music and share its player.
 The music comes from the folder in NIRULOCK's `[pause_music]`, set in
 `~/.config/niruui/lock.toml`. The default is `~/.local/share/nirux/music`,
 where NIRUX installs its own eleven SID-style chiptunes (Ogg Vorbis), shown as
@@ -126,7 +128,7 @@ where NIRUX installs its own eleven SID-style chiptunes (Ogg Vorbis), shown as
 `sidplayfp`, with the title, composer and year under the line) and `.ogg`,
 `.oga`, `.opus`, `.flac` or `.wav` files (played by `pw-play`, `ffplay` or
 `mpv`), mixed. The tunes play in natural order, and only if nothing else
-played during the first 2 seconds. Choosing `dark-sid` or `ascii-sid` is the choice to play, so it also plays when
+played during the first 2 seconds. Choosing `dark-sid`, `ascii-sid` or `c64-sid` is the choice to play, so it also plays when
 `niruidle` starts the saver; NIRULOCK's `enabled` and `on` do not apply. The
 music stops when the display goes off, when a key or click ends the saver,
 and when the lock takes over (`niruidle` ends the saver, and the player ends
@@ -141,12 +143,42 @@ stopped when the saver ends or the display goes off (and started again when
 the display comes back). If `nirudemo` is not installed, or exits within
 2 seconds of its start, that monitor shows `dark` instead (logged once).
 
+![The c64 scene](docs/screenshots/c64.png)
+
+`c64` draws a 320x200 C64 screen inside a border that reaches the edges of
+each monitor, at the largest whole scale that leaves a border (4 on a 1080p
+screen, 9 on 4K), with sharp pixels and centred to the pixel. It starts with
+the blue BASIC screen, `LOAD"NIRUX",8,1` and loading stripes in the border,
+then loops three parts of 24 seconds, the border closing over the screen
+between them:
+
+- NIRUX: raster bars in the border, a chunky NIRUX logo that bounces and
+  stretches with a sheen running through it, and a DYCP scroller (each
+  letter at its own height) with greetings and the time, mirrored in water.
+- BIFROST: a rotating dot sphere with 24 shaded balls on a slowly changing
+  Lissajous path in front of and behind it, the Elder Futhark runes for
+  NIRUX above, and rainbow bars in the border.
+- YGGDRASIL: the world tree, crown and roots, black before a dithered
+  character plasma, with the time in the lower border.
+
+Only the sixteen C64 colours are used: the theme's accent picks the logo's
+ramp and its text colour the bars (a grey theme gives steel with the C64's
+own blue). Each frame is drawn in C64 pixels, only the rows that changed are
+sent (through MIT-SHM when the X server is local), and the X server scales
+them with RENDER. It runs at 50 frames a second, slower on screens larger
+than 2560x1440 in total, and about 2 % of one core at 1080p. With the display
+off it draws nothing. `reduced_motion = true` shows a still picture of one
+part, a new one every minute. Without RENDER, or at a colour depth other than
+24 bits, it shows `dark` instead. The hostname is greeted only with
+`show_hostname = true`.
+
 With several monitors every scene draws on each one: the slide show scales
 the picture for each screen, and the dark line glides on every screen on its
 own path; `ascii` types the same text centred on every screen, sized for
 each one. `reduced_motion = true` stops the drift and crossfade and moves
 the dark line once a minute instead; `ascii` then shows the whole text at
-once, with a still cursor, shifted a little every minute.
+once, with a still cursor, shifted a little every minute. `c64` draws the
+same demo on every screen, each at its own scale.
 
 ### Clock layouts
 
@@ -184,7 +216,7 @@ Settings live in `~/.config/niruui/screensaver.toml` (XDG respected); see
 in `~/.config/niruwm/config.toml`; `[palette]` overrides affect content only.
 
 ```toml
-scene = "clock"                 # clock, photos, dark, dark-sid, ascii, ascii-sid, demo, shuffle
+scene = "clock"                 # clock, photos, dark, dark-sid, ascii, ascii-sid, demo, c64, c64-sid, shuffle
 shuffle = ["clock", "photos", "dark"]
 photos_folder = "~/Pictures/Wallpapers/NIRU"
 photos_seconds = 20             # 5 to 3600
@@ -225,12 +257,14 @@ only used when the shared file sets no `[idle]` values.
   `_NET_WM_WINDOW_OPACITY`; the window class is `NIRUSCREENSAVER`.
 - **No spectrum.** CAVA is not installed, `visual` is `quotes` or `none`, or
   (with `auto`) nothing is playing loud enough.
-- **No music with `dark-sid` or `ascii-sid`.** The folder (NIRULOCK's
+- **No music with `dark-sid`, `ascii-sid` or `c64-sid`.** The folder (NIRULOCK's
   `[pause_music] folder`, default `~/.local/share/nirux/music`, installed by
   NIRUX) must hold tunes, and their player must be installed (`pw-play`,
   `ffplay` or `mpv` for audio files, `sidplayfp` for `.sid`); the saver says
   why on standard error. Other audio playing as the saver starts keeps it
   silent.
+- **`c64` shows the dark line.** The X server has no RENDER extension or
+  is not at 24-bit colour; the saver says so on standard error.
 - **`demo` shows the dark line.** `nirudemo` is not on `PATH` or exited at
   once; the saver says so on standard error.
 - **`photos` shows the clock.** `photos_folder` has no PNG or JPEG pictures;

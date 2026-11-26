@@ -19,7 +19,7 @@ Usage: niruscreensaver --list
        niruscreensaver --shuffle add|remove|toggle SCENE
 
 Keys for --set:
-  scene              clock, photos, dark, dark-sid, ascii, ascii-sid, demo or shuffle
+  scene              clock, photos, dark, dark-sid, ascii, ascii-sid, demo, c64, c64-sid or shuffle
   layout             cava, minimal, terminal, runic or corner (the clock scene)
   visual             auto, music, cava, quotes or none (the clock scene)
   shuffle            scenes separated by commas, such as clock,photos,dark

@@ -30,6 +30,7 @@ mod media;
 #[allow(dead_code)]
 mod music;
 mod palette;
+mod pixfont;
 mod quotes;
 #[allow(dead_code)]
 mod reason;

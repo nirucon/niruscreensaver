@@ -3,6 +3,35 @@
 Releases before 0.18.0 are described in their GitHub release notes and the
 git history.
 
+## 0.19.0 (2026-11-26)
+
+### Added
+
+- **`c64` and `c64-sid`, new scenes: NIRUX as a Commodore 64 demo.** Each
+  monitor gets a 320x200 C64 screen in a border that reaches its edges, at
+  the largest whole scale with sharp pixels, centred to the pixel. A short
+  BASIC boot (`LOAD"NIRUX",8,1`, loading stripes in the border) leads into
+  three parts that loop, 24 seconds each, with the border closing over the
+  screen between them: NIRUX (raster bars in the border, a bouncing and
+  stretching NIRUX logo, a DYCP scroller with greetings and the time,
+  mirrored in water), BIFROST (a rotating dot sphere among 24 balls on a
+  Lissajous path, the Elder Futhark runes for NIRUX, rainbow bars) and
+  YGGDRASIL (the world tree before a dithered character plasma, the time in
+  the lower border). Only the sixteen C64 colours are used, picked by the
+  theme's accent and text colour. `c64` is silent; `c64-sid` plays the
+  pause music like `dark-sid`, shows the tune in the upper border and pulses
+  the effects on the beat. About 2 % of one core at 1080p: frames are drawn
+  in C64 pixels, only changed rows are sent (MIT-SHM where possible) and the
+  X server scales them with RENDER. Nothing is drawn with the display off;
+  `reduced_motion` shows a still part that changes every minute. Without
+  RENDER it falls back to `dark`. Both are in `--list`, `--set scene`,
+  `--preview` and can be added to `shuffle`; they are not in the default
+  shuffle list.
+
+### Changed
+
+- `install.sh` installs 0.19.0 by default (it still named 0.13.1).
+
 ## 0.18.0 (2026-11-21)
 
 ### Added

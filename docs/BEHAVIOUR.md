@@ -106,6 +106,29 @@ is reaped; it starts again when the display comes back. Without `nirudemo` on
 While the demos run the saver looks at them every 2 s (every 0.2 s in their
 first 2 s) and draws nothing itself. The scene plays no music.
 
+## The c64 scene
+
+`c64` keeps one frame buffer per monitor in C64 pixels, one byte a pixel
+(about 480x270 for a 1080p monitor, whatever its size), drawn from the time
+alone. Each frame is compared with the one before; only the bands of rows
+that changed are turned into pixels through a 16 colour table, written to a
+System V shared memory segment (MIT-SHM; a plain PutImage in bands where the
+server cannot map it, as over ssh) and put into a pixmap of the same size.
+The server then scales those bands onto the window with RENDER, nearest
+neighbour, at a whole scale. The segment is marked for removal as soon as
+the server has attached it, so it never outlives the saver.
+
+Motion advances in whole frames: 50 a second up to 2560x1440 monitor pixels
+in total, then slower, at most 25 a second. Every tenth frame waits for a
+round trip, so a busy server is never flooded. With the display off no
+frame is drawn and the loop sleeps; `c64-sid` also stops its music then
+(when NIRULOCK's `stop_on_display_off` says so) and the CAVA child it
+starts with the player to follow the beat (only when there are tunes to
+play; CAVA pauses itself in silence as in the clock scene). Measured in Xvfb at 1920x1080
+over a whole loop: about 1.8 % of one core for the saver (2 % in the busiest
+part), 5 % for the X server's scaling (software in Xvfb, a GPU does it on
+real hardware), 55 wakeups a second and 5.5 MB resident.
+
 ## Shared code
 
 The CAVA, audio detector, panel and quotes code is shared verbatim with

@@ -19,6 +19,11 @@
 #   "ascii-sid" as ascii, with the music like dark-sid
 #   "demo"      a realtime demoscene demo by NIRUDEMO on each screen,
 #               silent; dark where nirudemo is missing or fails
+#   "c64"       NIRUX as a Commodore 64 demo on each screen, silent: BASIC
+#               boot, then a bouncing logo with raster bars and a DYCP
+#               scroller, a dot sphere with Lissajous balls and runes, and
+#               Yggdrasil before a plasma; C64 colours picked by the theme
+#   "c64-sid"   as c64, with the music like dark-sid, effects on the beat
 #   "shuffle"   one of the scenes in `shuffle`, a new pick every time
 scene = "clock"
 shuffle = ["clock", "photos", "dark"]
